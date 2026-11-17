@@ -3,6 +3,14 @@
   "version": "0.2.0",
   "type": "module",
   "description": "DeepSeek Harness plugin: a research desk for literature discovery, anchored reading, multi-perspective review, hypothesis tracking, sandboxed verification runs and export.",
+  "homepage": "https://github.com/stallenlu/dsh-research-desk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stallenlu/dsh-research-desk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stallenlu/dsh-research-desk/issues"
+  },
   "exports": {
     ".": "./lib/host.mjs",
     "./client": "./lib/client.js",
