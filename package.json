@@ -14,7 +14,11 @@
   "exports": {
     ".": "./lib/host.mjs",
     "./client": "./lib/client.js",
+    "./mcp": "./lib/mcp.mjs",
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-research-desk-mcp": "./bin/dsh-research-desk-mcp.mjs"
   },
   "dsh": {
     "bundle": {
@@ -27,6 +31,7 @@
   },
   "files": [
     "lib",
+    "bin",
     "cordis.patch.yml",
     "index.json",
     "README.md",
