@@ -1,6 +1,6 @@
 # 设置项参考
 
-`dsh-research-desk` v0.2.0 一共 **22 项**设置，全部定义在 `lib/settings.mjs` 的 `SETTING_DEFS` 里。
+`dsh-research-desk` v0.3.1 一共 **22 项**设置，全部定义在 `lib/settings.mjs` 的 `SETTING_DEFS` 里。
 设置面板（侧栏「设置」页签）、宿主工具 `research_desk` 的 `settings` 动作、MCP 的 `settingsView` 读的是同一份数据，改完即时生效，「恢复默认」一键还原。
 
 ## 1. 检索
