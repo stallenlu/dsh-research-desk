@@ -3,7 +3,7 @@
 DeepSeek Harness 插件：给 agent 和研究者一个**就在侧栏里的科研工作台**——检索文献、维护阅读库、抓全文做带锚点的问答、推可证伪选题、写多视角综述、在受限目录里跑验证脚本、整库导出。
 **每一条引文都回到原文逐字核对，对不上就剔除。**
 
-- 包名 `dsh-research-desk`，版本 0.2.0，MIT，零运行时依赖，零构建步骤
+- 包名 `dsh-research-desk`，版本 0.3.1，MIT，零运行时依赖，零构建步骤
 - 宿主要求：DSH `>=0.2.1-rc.5 <0.3.0`，Node `>=22`
 - 交付渠道：GitHub + npm + dshmarket（索引条目见 `index.json`）
 
@@ -92,7 +92,7 @@ DeepSeek Harness 插件：给 agent 和研究者一个**就在侧栏里的科研
 
 ### 3.1 dshmarket 市场安装（推荐）
 
-在 dshmarket 的插件市场里找到「科研工作台 / Research Desk」，一键安装。dshmarket 读取的正是精选列表 awesome-dsh-plugin 里的索引条目，版本与 npm 上的 `dsh-research-desk` 对应（当前 0.2.0）。
+在 dshmarket 的插件市场里找到「科研工作台 / Research Desk」，一键安装。dshmarket 读取的正是精选列表 awesome-dsh-plugin 里的索引条目，版本与 npm 上的 `dsh-research-desk` 对应（当前 0.3.1）。
 
 ### 3.2 npm 规格名安装
 
@@ -118,7 +118,7 @@ https://cdn.jsdelivr.net/gh/stallenlu/dsh-research-desk@main/index.json
   "format": 1,
   "title": { "en": "Research Desk", "zh": "科研工作台" },
   "description": { "en": "...", "zh": "..." },
-  "metadata": { "categories": ["research", "literature", "productivity"] },
+  "metadata": { "categories": ["tools", "docs"] },
   "plugins": [
     {
       "name": "dsh-research-desk",
@@ -127,11 +127,11 @@ https://cdn.jsdelivr.net/gh/stallenlu/dsh-research-desk@main/index.json
       "author": "stallenlu",
       "homepage": "https://github.com/stallenlu/dsh-research-desk",
       "repository": { "url": "https://github.com/stallenlu/dsh-research-desk" },
-      "metadata": { "category": "research", "keywords": ["research", "literature", "arxiv", "pubmed", "openalex", "科研", "文献"] },
+      "metadata": { "category": "tools", "keywords": ["research", "literature", "arxiv", "pubmed", "openalex", "科研", "文献"] },
       "versions": [
         {
-          "version": "0.2.0",
-          "publishTimestamp": "2026-11-18T01:00:00.000Z",
+          "version": "0.3.1",
+          "publishTimestamp": "2026-11-18T01:40:00.000Z",
           "source": { "type": "npm" },
           "engines": { "dsh": ">=0.2.1-rc.5 <0.3.0" }
         }
@@ -270,7 +270,7 @@ Agent 侧只有一个工具：`research_desk`（超时 300 秒，标记为并发
 
 `lib/mcp.mjs` 同时提供一个 stdio 传输的 MCP server，让别的 agent 也能用同一份文献库。
 
-- 协议版本 `2024-11-05`，服务名 `dsh-research-desk`，版本 `0.2.0`，能力声明为 `tools`。
+- 协议版本 `2024-11-05`，服务名 `dsh-research-desk`，版本 `0.3.1`，能力声明为 `tools`。
 - stdout 只走 JSON-RPC，诊断日志走 stderr；`notifications/initialized` 不回包。
 - 与桌面面板共用同一个 `state.json` 与同一套 `applyOps` 写路径，**MCP 写入的内容在面板里立刻可见**。
 

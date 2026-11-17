@@ -1,6 +1,6 @@
 # 架构说明
 
-本文说明 dsh-research-desk v0.2.0 的数据流、模块职责、状态文件形状与扩展点。
+本文说明 dsh-research-desk v0.3.1 的数据流、模块职责、状态文件形状与扩展点。
 
 ## 1. 数据流
 
@@ -38,6 +38,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 - **面板**：`lib/client.js` 通过 `ctx.webServer` 暴露的前缀路由 `/api/research-desk/` 调用服务，前端只认这一个 POST 入口。
 - **工具**：`ctx.tools.register({ name: "research_desk" })`，超时 300 秒，`isConcurrencySafe` 为真，把 `exec.signal` 透传给服务以支持取消。
 - **MCP**：`lib/mcp.mjs` 的 `runMcpStdio()` 从 stdin 读每行 JSON-RPC，只把响应写 stdout，诊断信息写 stderr。
+  可执行入口是 `bin/dsh-research-desk-mcp.mjs`（`package.json` 的 `bin` 与 `exports["./mcp"]` 都指向它）。
 
 ## 2. 模块职责
 
@@ -55,6 +56,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 | `lib/settings.mjs` | 22 条设置定义、类型校验、密钥解析 | `SETTING_DEFS`、`coerceSettings`、`readSettings`、`resolveSecret` |
 | `lib/stats.mjs` | 纯 JS 统计自查：t 检验、效应量、置信区间、多重比较校正 | `oneSampleT`、`twoSampleWelch`、`pairedT`、`adjustPvalues` |
 | `lib/llm.mjs` | 模型路由与流式调用 | `listModels`、`defaultRoute`、`streamText` |
+| `bin/dsh-research-desk-mcp.mjs` | MCP 可执行入口：`package.json` 的 `bin` 条目 `dsh-research-desk-mcp` 指向它，`exports` 另有 `./mcp` 子路径 | `runMcpStdio()` |
 | `lib/mcp.mjs` | MCP stdio server 与 5 个工具 | `MCP_TOOLS`、`createMcpServer`、`runMcpStdio` |
 | `lib/util.mjs` | 文本、列表、编号、URL 等清洗工具 | `cleanText`、`cleanList`、`toNumber`、`isHttpUrl` |
 

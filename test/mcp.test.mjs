@@ -5,8 +5,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
+import { readFileSync } from 'node:fs'
+import { dirname, join as joinPath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { MCP_TOOLS, createMcpServer, runMcpStdio } from '../lib/mcp.mjs'
+
+// The advertised version must track package.json, not a literal copy that goes stale on every bump.
+const pkg = JSON.parse(readFileSync(joinPath(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'))
 
 async function withTempDir(fn) {
   const root = await mkdtemp(join(tmpdir(), 'rd-mcp-'))
@@ -50,7 +56,7 @@ test('mcp: initialize 返回正确的协议版本与服务信息', async () => {
     assert.equal(res.result.protocolVersion, '2024-11-05')
     assert.deepEqual(res.result.capabilities, { tools: {} })
     assert.equal(res.result.serverInfo.name, 'dsh-research-desk')
-    assert.equal(res.result.serverInfo.version, '0.2.0')
+    assert.equal(res.result.serverInfo.version, pkg.version)
   })
 })
 
