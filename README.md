@@ -3,7 +3,7 @@
 DeepSeek Harness 插件：给 agent 和研究者一个**就在侧栏里的科研工作台**——检索文献、维护阅读库、抓全文做带锚点的问答、推可证伪选题、写多视角综述、在受限目录里跑验证脚本、整库导出。
 **每一条引文都回到原文逐字核对，对不上就剔除。**
 
-- 包名 `dsh-research-desk`，版本 0.3.1，MIT，零运行时依赖，零构建步骤
+- 包名 `dsh-research-desk`，版本 0.3.2，MIT，零运行时依赖，零构建步骤
 - 宿主要求：DSH `>=0.2.1-rc.5 <0.3.0`，Node `>=22`
 - 交付渠道：GitHub + npm + dshmarket（索引条目见 `index.json`）
 
@@ -92,7 +92,7 @@ DeepSeek Harness 插件：给 agent 和研究者一个**就在侧栏里的科研
 
 ### 3.1 dshmarket 市场安装（推荐）
 
-在 dshmarket 的插件市场里找到「科研工作台 / Research Desk」，一键安装。dshmarket 读取的正是精选列表 awesome-dsh-plugin 里的索引条目，版本与 npm 上的 `dsh-research-desk` 对应（当前 0.3.1）。
+在 dshmarket 的插件市场里找到「科研工作台 / Research Desk」，一键安装。dshmarket 读取的正是精选列表 awesome-dsh-plugin 里的索引条目，版本与 npm 上的 `dsh-research-desk` 对应（当前 0.3.2）。
 
 ### 3.2 npm 规格名安装
 
@@ -130,7 +130,7 @@ https://cdn.jsdelivr.net/gh/stallenlu/dsh-research-desk@main/index.json
       "metadata": { "category": "tools", "keywords": ["research", "literature", "arxiv", "pubmed", "openalex", "科研", "文献"] },
       "versions": [
         {
-          "version": "0.3.1",
+          "version": "0.3.2",
           "publishTimestamp": "2026-11-18T01:40:00.000Z",
           "source": { "type": "npm" },
           "engines": { "dsh": ">=0.2.1-rc.5 <0.3.0" }
@@ -270,7 +270,7 @@ Agent 侧只有一个工具：`research_desk`（超时 300 秒，标记为并发
 
 `lib/mcp.mjs` 同时提供一个 stdio 传输的 MCP server，让别的 agent 也能用同一份文献库。
 
-- 协议版本 `2024-11-05`，服务名 `dsh-research-desk`，版本 `0.3.1`，能力声明为 `tools`。
+- 协议版本 `2024-11-05`，服务名 `dsh-research-desk`，版本 `0.3.2`，能力声明为 `tools`。
 - stdout 只走 JSON-RPC，诊断日志走 stderr；`notifications/initialized` 不回包。
 - 与桌面面板共用同一个 `state.json` 与同一套 `applyOps` 写路径，**MCP 写入的内容在面板里立刻可见**。
 
@@ -341,7 +341,7 @@ import { runMcpStdio } from 'dsh-research-desk/mcp'
 
 ## 9. 已知限制
 
-- **插件还没有在真实宿主会话里端到端安装验证过**：侧栏 slot 注册、工具注册、面板渲染都还是纸面推演，这是当前最大的未知项。
+- **桌面壳（`dsh-app://`）里没验过面板**：验收跑在独立的 web 实例上（http 形态），侧栏入口与面板渲染都确认了；Electron 桌面壳走的是另一条取址路径，尚未实机验证。
 - **外部运行时依赖使用者自己的机器**：探测顺序是设置里的解释器路径 → 常见命令名（`python` / `python3` / `py -3` / `node`）→ DSH 自带运行时；探不到就没有执行环境。
 - **综述与问答的质量取决于库里的全文覆盖**：只抓了摘要的文献不参与综述，也不参与引文核验。
 - **导出的 JSON 默认不含全文片段**：只留片段序号与标题，正文留在本地库里。
@@ -367,6 +367,21 @@ node --test test/desk.test.mjs test/export.test.mjs test/host.test.mjs test/mcp.
 node test/live-probe.mjs
 node test/raw-probe.mjs
 ```
+
+### 真机验收
+
+`test/acceptance.mjs` 是一次性把四段全验掉的脚本：它自己拉起一个独立的 web profile 实例（端口被占用就顺延），验收完关掉实例并还原它动过的文献库，不会碰你日常用的 desktop 实例。
+
+```bash
+node test/acceptance.mjs                 # 全跑（A 环境 / B 非模型动作 / C 四条模型路径 / D 面板与周边）
+node test/acceptance.mjs --skip-model    # 跳过需要真实模型的四段
+node test/acceptance.mjs --only=B,D      # 只跑指定分组
+node test/acceptance.mjs --keep-state    # 不还原文献库
+```
+
+四组分别验的是：A 宿主 exe / cli 入口 / profile / 插件安装；B status、models、settings 视图、密钥脱敏、检索、入库、文献库、read；C ask、review、hypothesis、draft 四条真实模型链路；D 侧栏「科研工作台」入口与面板 DOM、导出三格式、外部工具闸门与真跑、MCP stdio 入口。当前结果：**24 项全过，用时约 60 秒**。
+
+渲染检查走 CDP（自己起一个带调试端口的 Edge，导航后取 `outerHTML`）——Edge 的 `--dump-dom` 从 Node spawn 出来会吐 0 字节，不能用。
 
 发布流程：
 
