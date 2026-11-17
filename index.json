@@ -10,9 +10,8 @@
   },
   "metadata": {
     "categories": [
-      "research",
-      "literature",
-      "productivity"
+      "tools",
+      "docs"
     ]
   },
   "plugins": [
@@ -32,7 +31,7 @@
         "url": "https://github.com/stallenlu/dsh-research-desk"
       },
       "metadata": {
-        "category": "research",
+        "category": "tools",
         "keywords": [
           "research",
           "literature",
@@ -53,8 +52,8 @@
       },
       "versions": [
         {
-          "version": "0.2.0",
-          "publishTimestamp": "2026-11-18T01:00:00.000Z",
+          "version": "0.3.0",
+          "publishTimestamp": "2026-11-18T01:30:00.000Z",
           "source": {
             "type": "npm"
           },
