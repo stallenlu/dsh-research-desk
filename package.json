@@ -1,0 +1,48 @@
+{
+  "name": "dsh-research-desk",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "DeepSeek Harness plugin: a research desk for literature discovery, anchored reading, multi-perspective review, hypothesis tracking, sandboxed verification runs and export.",
+  "exports": {
+    ".": "./lib/host.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": ["slots"]
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "index.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "research",
+    "literature",
+    "hypothesis",
+    "arxiv",
+    "pubmed",
+    "openalex",
+    "科研",
+    "文献",
+    "选题",
+    "综述",
+    "experiment",
+    "mcp"
+  ],
+  "license": "MIT"
+}

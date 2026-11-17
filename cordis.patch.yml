@@ -1,0 +1,4 @@
+# dsh bundle patch: mount the research desk into a profile layer.
+- insert:
+    - id: research-desk
+      name: 'dsh-research-desk'

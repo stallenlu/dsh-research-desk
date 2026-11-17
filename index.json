@@ -1,0 +1,68 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Research Desk",
+    "zh": "科研工作台"
+  },
+  "description": {
+    "en": "Open-source DeepSeek Harness plugin for the literature loop: search, curate, read with anchors, ask grounded questions, frame hypotheses, draft a paper outline.",
+    "zh": "开源的 DeepSeek Harness 科研工作台插件：检索、精选、带着页码精读、有锚点问答、选题、草稿写作，一条龙跑通文献工作流。"
+  },
+  "metadata": {
+    "categories": [
+      "research",
+      "literature",
+      "productivity"
+    ]
+  },
+  "plugins": [
+    {
+      "name": "dsh-research-desk",
+      "title": {
+        "en": "Research Desk",
+        "zh": "科研工作台"
+      },
+      "description": {
+        "en": "Search arXiv / Europe PMC / OpenAlex without an API key, keep a reading library, pull full text, ask questions answered only from that text, write multi-perspective reviews, derive falsifiable hypotheses, run sandboxed verification snippets and export the whole library.",
+        "zh": "免密钥检索 arXiv / Europe PMC / OpenAlex，维护阅读文献库并拉取全文，只用全文回答问题并逐条核验引文，写多视角综述与研究缺口，从文献库推出可证伪选题，在沙箱里跑验证脚本，最后整库导出。"
+      },
+      "author": "stallenlu",
+      "homepage": "https://github.com/stallenlu/dsh-research-desk",
+      "repository": {
+        "url": "https://github.com/stallenlu/dsh-research-desk"
+      },
+      "metadata": {
+        "category": "research",
+        "keywords": [
+          "research",
+          "literature",
+          "arxiv",
+          "pubmed",
+          "openalex",
+          "hypothesis",
+          "citation",
+          "science",
+          "科研",
+          "文献",
+          "选题",
+          "引文",
+          "综述",
+          "实验验证",
+          "导出"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.2.0",
+          "publishTimestamp": "2026-11-18T01:00:00.000Z",
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.5 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}
