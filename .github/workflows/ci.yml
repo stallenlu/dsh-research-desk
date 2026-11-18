@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Unit tests
+        run: node --test test/bin.test.mjs test/desk.test.mjs test/export.test.mjs test/host.test.mjs test/mcp.test.mjs test/review.test.mjs test/runner.test.mjs test/search.test.mjs test/settings.test.mjs test/stats.test.mjs
+      - name: Syntax check
+        run: node --check lib/host.mjs && node --check lib/client.js
