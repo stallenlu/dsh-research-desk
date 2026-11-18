@@ -94,6 +94,8 @@ DeepSeek Harness 插件：给 agent 和研究者一个**就在侧栏里的科研
 
 在 dshmarket 的插件市场里找到「科研工作台 / Research Desk」，一键安装。dshmarket 读取的正是精选列表 awesome-dsh-plugin 里的索引条目，版本与 npm 上的 `dsh-research-desk` 对应（当前 0.3.3）。
 
+> 收录状态：条目已向上游精选列表提 PR（<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/16413>），等上游合并并重建站点目录后才会出现在市场里。**在此之前请走 3.2（npm 规格名）或 3.3（自定义索引）安装**——这两条路不依赖市场收录。
+
 ### 3.2 npm 规格名安装
 
 在宿主插件页的规格名输入框填 `dsh-research-desk`；或者在终端里用 CLI（需要 `dsh` 在 PATH）：
@@ -358,6 +360,7 @@ import { runMcpStdio } from 'dsh-research-desk/mcp'
 - **没有多用户与权限模型**：状态是一份本地文件，没有账号、角色或协作冲突界面；撤销栈是单机的 30 步。
 - **检索只覆盖三个开放源**：Google Scholar 没有官方 API，Scopus / Web of Science 需要付费订阅。
 - **选题与草稿的输入只有标题和摘要**，做不了机制级结论。
+- **还没进市场**：精选列表收录 PR 已提交但上游尚未合并，市场可见性依赖上游 CI 与其共享配额；本仓库能做的都做完了。
 
 ---
 
@@ -397,7 +400,7 @@ node test/acceptance.mjs --keep-state    # 不还原文献库
 
 1. `npm publish`（包名 `dsh-research-desk`，主入口 `lib/host.mjs`，客户端入口 `lib/client.js`）。
 2. GitHub 仓库 <https://github.com/stallenlu/dsh-research-desk> 维护 README、`docs/` 与 MIT LICENSE。
-3. 向 awesome-dsh-plugin 精选列表提 PR 收录本插件——dshmarket 读取的就是这份精选列表；同时在 `index.json` 里更新版本号与发布时间。
+3. 向 awesome-dsh-plugin 精选列表提 PR 收录本插件——dshmarket 读取的就是这份精选列表（**注意是上游 `awesome-dsh-plugin/awesome-dsh-plugin`，不是任何 fork**；上游只收一个 `data/plugins/<owner>__<repo>.yml` 文件，README 由上游脚本生成、禁止手改）。本插件的 PR 是 <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/16413>，仓库年龄门槛由上游 gate 自动放行，合并后还要等上游 build-site 产出新的 `plugins.json` 与 npm `dsh-plugin-catalog`，市场才会显示。同期在 `index.json` 里更新版本号与发布时间。
 
 ---
 
