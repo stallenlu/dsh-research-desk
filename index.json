@@ -9,10 +9,22 @@
     "zh": "开源的 DeepSeek Harness 科研工作台插件：检索、精选、带着页码精读、有锚点问答、选题、草稿写作，一条龙跑通文献工作流。"
   },
   "metadata": {
-    "categories": [
-      "tools",
-      "docs"
-    ]
+    "categories": {
+      "tools": {
+        "title": {
+          "en": "Tools",
+          "zh": "工具"
+        }
+      },
+      "docs": {
+        "title": {
+          "en": "Docs",
+          "zh": "文档"
+        }
+      }
+    },
+    "labels": {},
+    "sortKeys": {}
   },
   "plugins": [
     {
@@ -25,6 +37,7 @@
         "en": "Search arXiv / Europe PMC / OpenAlex without an API key, keep a reading library, pull full text, ask questions answered only from that text, write multi-perspective reviews, derive falsifiable hypotheses, run sandboxed verification snippets and export the whole library.",
         "zh": "免密钥检索 arXiv / Europe PMC / OpenAlex，维护阅读文献库并拉取全文，只用全文回答问题并逐条核验引文，写多视角综述与研究缺口，从文献库推出可证伪选题，在沙箱里跑验证脚本，最后整库导出。"
       },
+      "icon": "https://raw.githubusercontent.com/stallenlu/dsh-research-desk/main/assets/icon-180.png",
       "author": "stallenlu",
       "homepage": "https://github.com/stallenlu/dsh-research-desk",
       "repository": {
@@ -48,12 +61,14 @@
           "综述",
           "实验验证",
           "导出"
-        ]
+        ],
+        "labels": [],
+        "sortKeys": {}
       },
       "versions": [
         {
-          "version": "0.3.2",
-          "publishTimestamp": "2026-11-18T07:25:00.000Z",
+          "version": "0.3.3",
+          "publishTimestamp": 1794991200,
           "source": {
             "type": "npm"
           },

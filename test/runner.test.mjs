@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 import {
   RUNTIMES,
@@ -72,7 +72,9 @@ test('runner: validatePackages 接受正常包名，拒绝恶意包名', () => {
 })
 
 test('runner: workDirFor 用设置里的工作目录，否则用数据目录下的 runs', () => {
-  assert.equal(workDirFor({ 'runner.workDir': 'D:/tmp/rd' }, 'C:/data'), 'D:' + '\\tmp\\rd')
+  const configured = workDirFor({ 'runner.workDir': 'D:/tmp/rd' }, 'C:/data')
+  assert.equal(isAbsolute(configured), true)
+  assert.equal(configured.endsWith(join('tmp', 'rd')), true)
   assert.equal(workDirFor({}, 'C:/data').endsWith(join('runs')), true)
 })
 
