@@ -143,7 +143,7 @@ https://cdn.jsdelivr.net/gh/stallenlu/dsh-research-desk@main/index.json
       "versions": [
         {
           "version": "0.3.3",
-          "publishTimestamp": 1794991200,
+          "publishTimestamp": 1794962477,
           "source": { "type": "npm" },
           "engines": { "dsh": ">=0.2.1-rc.5 <0.3.0" }
         }
