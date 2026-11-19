@@ -82,3 +82,12 @@ test('high-impact papers use the same card row as to-read list', () => {
   assert.ok(src.includes('.md-i-top .md-desk-feed-row .md-top-title{flex:1;min-width:0}'), 'feed-row title needs ellipsis CSS')
   assert.ok(src.includes('.md-i-top .md-desk-feed-list{flex:1;min-height:0;overflow-y:auto'), 'top feed list must scroll internally')
 })
+
+test('reasoning frames are streamed, accumulated and rendered collapsibly', () => {
+  assert.ok(src.includes('let reasoningAcc = \'\''), 'send must accumulate reasoning frames')
+  assert.ok(src.includes('if (ev.reasoning) reasoningAcc += ev.text'), 'delta handler must collect reasoning text')
+  assert.ok(src.includes("k: ev.reasoning ? 'reason' :"), 'lab console must tag reasoning frames')
+  assert.ok(src.includes("className: 'md-reason', key: 'reason'"), 'chat must render a collapsible reasoning block')
+  assert.ok(src.includes('.md-reason>summary{cursor:pointer'), 'reasoning summary must be a collapsible toggle')
+  assert.ok(src.includes('is-reason'), 'console reasoning lines need a distinct style')
+})
