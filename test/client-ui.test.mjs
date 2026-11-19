@@ -36,7 +36,7 @@ test('three on-demand triggers are clickable affordances', () => {
 test('lab total entry preserved and collab view dispatched', () => {
   assert.ok(src.includes("['lab', '虚空']"))
   assert.ok(src.includes("view === 'collab' ? collabView"))
-  assert.ok(src.includes("'虚空 · 科灵带队做虚拟实验'"))
+  assert.ok(src.includes("'在虚空里验证'"))
 })
 
 test('void space: no object Object leak and md-seg role controls', () => {
