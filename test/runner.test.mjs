@@ -10,8 +10,10 @@ import { isAbsolute, join } from 'node:path'
 
 import {
   RUNTIMES,
+  filteredEnv,
   installPackages,
   probeRuntime,
+  runProcess,
   runCode,
   validateCode,
   validatePackages,
@@ -249,3 +251,105 @@ test('runner: 包名不合法时即使允许安装也拒绝', async () => {
     assert.equal(result.installed.length, 0)
   })
 })
+
+// ===== 加固三缺口（方案 v1.3 §3.2 阶段0）的补充测试 =====
+
+test('runner: filteredEnv 排除凭据类变量（TOKEN/KEY/SECRET/AWS_/GH_）', () => {
+  // 临时往 process.env 注入若干凭据变量，验证一律不出现在白名单里。
+  const injected = {
+    DEEPSEEK_TOKEN: 'tok-secret',
+    OPENAI_API_KEY: 'sk-secret',
+    MY_SECRET_VALUE: 'shh',
+    AWS_ACCESS_KEY_ID: 'AKIA-secret',
+    GITHUB_TOKEN: 'ghp-secret',
+    GH_TOKEN: 'ghp-secret-2',
+    RD_SAFE_FLAG: 'keep-me-if-allowed',
+  }
+  const before = {}
+  for (const key of Object.keys(injected)) {
+    before[key] = process.env[key]
+    process.env[key] = injected[key]
+  }
+  try {
+    for (const mode of ['exec', 'install']) {
+      const env = filteredEnv(mode)
+      for (const key of Object.keys(injected)) {
+        // 凭据特征命中者必须被排除；非凭据键本身也不在基础白名单里，同样不出现。
+        assert.equal(env[key], undefined, mode + ' 模式不应包含 ' + key)
+      }
+      for (const value of Object.values(env)) {
+        for (const secret of ['tok-secret', 'sk-secret', 'shh', 'AKIA-secret', 'ghp-secret', 'ghp-secret-2']) {
+          assert.equal(String(value).includes(secret), false, mode + ' 模式泄漏了凭据值')
+        }
+      }
+    }
+  } finally {
+    for (const key of Object.keys(injected)) {
+      if (before[key] === undefined) delete process.env[key]
+      else process.env[key] = before[key]
+    }
+  }
+})
+
+test('runner: filteredEnv 的 exec / install 代理行为不同（exec 断网、install 保真）', () => {
+  // 只设一个可识别的真实代理值：Windows 上 process.env 大小写不敏感，
+  // HTTP_PROXY 与 http_proxy 是同一个变量，不能给它们设不同的值。
+  const before = process.env.HTTP_PROXY
+  const beforeNo = process.env.NO_PROXY
+  process.env.HTTP_PROXY = 'http://real-proxy.example:8080'
+  process.env.NO_PROXY = 'localhost'
+  try {
+    const exec = filteredEnv('exec')
+    const install = filteredEnv('install')
+    // exec：所有代理指向 127.0.0.1:65536（无效端口），NO_PROXY 置空 → 全量断网。
+    assert.equal(exec.HTTP_PROXY, 'http://127.0.0.1:65536')
+    assert.equal(exec.HTTPS_PROXY, 'http://127.0.0.1:65536')
+    assert.equal(exec.ALL_PROXY, 'http://127.0.0.1:65536')
+    assert.equal(exec.FTP_PROXY, 'http://127.0.0.1:65536')
+    assert.equal(exec.NO_PROXY, '')
+    // install：保留真实代理与 NO_PROXY。
+    assert.equal(install.HTTP_PROXY, 'http://real-proxy.example:8080')
+    assert.equal(install.NO_PROXY, 'localhost')
+    // 基础键始终保留（这里用 PATH 存在性验证）。
+    assert.equal(typeof exec.PATH, 'string')
+  } finally {
+    if (before === undefined) delete process.env.HTTP_PROXY
+    else process.env.HTTP_PROXY = before
+    if (beforeNo === undefined) delete process.env.NO_PROXY
+    else process.env.NO_PROXY = beforeNo
+  }
+})
+
+test('runner: killOnLimit=true 超过 maxOutputChars 立即杀进程', async () => {
+  // 子进程无限打印，若超限不杀会一直跑到超时（这里超时设很长，靠超限杀）。
+  const res = await runProcess({
+    cmd: process.execPath,
+    args: ['-e', 'setInterval(() => process.stdout.write("x".repeat(1000)), 5)'],
+    cwd: process.cwd(),
+    timeoutMs: 30000,
+    maxOutputChars: 5000,
+    killOnLimit: true,
+  })
+  // 被杀：退出码非空、不是超时（在超时前就被杀）。
+  assert.equal(res.timedOut, false)
+  assert.notEqual(res.code, 0)
+  assert.equal(res.stdout.length > 5000, true, '允许在触发杀之前多收一点，但应远超上限')
+})
+
+test('runner: killOnLimit=false 超量不杀（verbose pip 场景）', async () => {
+  // 同样的无限输出，但不开启 killOnLimit，也不让它超时：让它跑短一点自然退出。
+  // 用有限循环保证进程自行结束，输出量远超上限。
+  const res = await runProcess({
+    cmd: process.execPath,
+    args: ['-e', 'for (let i = 0; i < 20; i++) process.stdout.write("y".repeat(1000))'],
+    cwd: process.cwd(),
+    timeoutMs: 10000,
+    maxOutputChars: 1000,
+    killOnLimit: false,
+  })
+  // 不杀：正常退出码 0，未标记为超时，输出全部收集（远超上限）。
+  assert.equal(res.timedOut, false)
+  assert.equal(res.code, 0)
+  assert.equal(res.stdout.length, 20000)
+})
+
