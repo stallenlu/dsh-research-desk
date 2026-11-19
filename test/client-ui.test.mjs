@@ -2,6 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -31,6 +32,25 @@ test('three on-demand triggers are clickable affordances', () => {
   for (const t of ['让科灵验证', '验证这个论点', '虚空验证']) {
     assert.ok(src.includes(t), 'missing trigger ' + t)
   }
+})
+
+test('topics and content tabs merged into one research desk with dual lenses', () => {
+  assert.ok(src.includes("['research', '研究台']"), 'NAV must have single research entry')
+  assert.ok(!src.includes("['topics', '选题']") && !src.includes("['content', '内容']"), 'old two tabs must be gone')
+  assert.ok(src.includes("view === 'research' ? researchView"), 'dispatch must route to researchView')
+  assert.ok(src.includes("const researchView = h('div'"), 'researchView must exist')
+  assert.ok(src.includes("'验证视角'") && src.includes("'发布视角'"), 'dual lens seg must exist')
+  assert.ok(src.includes('同一条选题：验证视角看验证结论'), 'plain-language disambiguation must be on screen')
+  assert.ok(src.includes("action: 'set_hypothesis_status'"), 'verify-lens drag must call the new action')
+  assert.ok(src.includes('写作: '), 'publish-lens cards must prefix writing dimension')
+  assert.ok(!src.includes("status: 'outline', source: '选题'"), 'hypothesis must not be hardcoded to outline')
+})
+test('set_hypothesis_status action is fully wired in host', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  assert.ok(host.includes("'set_hypothesis_status'"), 'action must be in ACTIONS')
+  assert.ok(host.includes('async setHypothesisStatus'), 'service method must exist')
+  assert.ok(host.includes('HYPOTHESIS_STATUS.includes(status)'), 'status must be enum-validated')
+  assert.ok(host.includes("id: { type: 'string', description: 'Hypothesis id"), 'schema must expose id')
 })
 
 test('lab total entry preserved and collab view dispatched', () => {
