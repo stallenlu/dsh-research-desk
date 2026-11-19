@@ -52,3 +52,10 @@ test('Phase3 evaluation flows back into content workflow as draft', () => {
   assert.ok(src.includes('flowBackToDraft'), 'missing flow-back helper')
   assert.ok(src.includes("action: 'draft', instruction: instruction"), 'draft action not wired with instruction')
 })
+
+test('void space: advanced lab embeds inline and quick tasks keep gutters', () => {
+  assert.ok(src.includes("className: 'md-lab-embed', key: 'lab'"), 'labView root must be inline embed, not md-board-page')
+  assert.ok(src.includes('.md-lab-embed{display:block;position:relative'), 'missing inline embed CSS')
+  assert.ok(src.includes('.md-collab .md-desk-tasks{padding:0 16px 16px}'), 'quick task cards must keep tile gutters')
+  assert.ok(!src.includes("className: 'md-board-page', key: 'lab'"), 'labView must not be a full-page absolute container')
+})
