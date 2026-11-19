@@ -16,6 +16,7 @@ import { join } from 'node:path'
 
 import { apply, createService } from '../lib/host.mjs'
 import { SETTING_DEFS } from '../lib/settings.mjs'
+import { canProceed } from '../lib/approval.mjs'
 
 // ── 网络闸门 ─────────────────────────────────────────────────────────────────
 // 检索动作会打到 arXiv / Europe PMC / OpenAlex。测试里把 fetch 换成闸门：
@@ -583,4 +584,209 @@ test('工具的 execute 走的是同一套服务', async () => {
   const result = await registered.tool.execute({ action: 'status' }, { signal: undefined })
   assert.equal(result.ok, true)
   assert.equal(result.action, 'status')
+})
+
+// ── Phase1 带队合作 / 安全闸门 ───────────────────────────────────────────────
+
+test('collab_create 落库并带着角色与 library 视图返回', async () => {
+  const { svc } = freshService()
+  const r = await svc.run({ action: 'collab_create', title: '验证带队', goal: { text: '看机制能否跑通', source: 'human' }, kelinRole: 'engineer', autonomy: 'L2' })
+  assert.equal(r.ok, true)
+  assert.ok(r.collab && r.collab.id)
+  assert.equal(r.collab.kelinRole, 'engineer')
+  assert.equal(r.collab.autonomy, 'L2')
+  assert.equal(r.collab.status, 'active')
+  assert.equal(r.library.collaborations.length, 1)
+  assert.equal(r.library.collaborations[0].title, '验证带队')
+})
+
+test('八个 collab action 名都在工具枚举里', () => {
+  const registered = { tool: null }
+  apply({
+    get: ctx.get,
+    effect: fn => { fn(); return () => {} },
+    tools: { register: def => { registered.tool = def } },
+    webServer: { register: () => {} },
+  })
+  const actions = registered.tool.parameters.properties.action.enum
+  for (const a of ['collab_create','collab_step','collab_plan','collab_decision_ask','collab_decision_answer','collab_run','collab_evaluate','collab_list']) {
+    assert.ok(actions.includes(a), '缺少 action: ' + a)
+  }
+  const props = registered.tool.parameters.properties
+  for (const p of ['collabId','goal','step','point','choice','by','decisionId','payload','conclusion','kelinRole','autonomy']) {
+    assert.ok(props[p], '缺少参数声明: ' + p)
+  }
+})
+
+test('collab_plan 生成 team/environment/steps 并写入，明确标注降级不声称可用', async () => {
+  const { svc } = freshService()
+  const c = await svc.run({ action: 'collab_create', title: '计划测试', goal: { text: '目标X', source: 'human' } })
+  const p = await svc.run({ action: 'collab_plan', collabId: c.collab.id })
+  assert.equal(p.ok, true)
+  assert.equal(p.plan.source, 'template')
+  assert.match(p.plan.note, /未调用子 agent/)
+  assert.ok(p.plan.team.length >= 4)
+  assert.equal(p.plan.steps.length, 5)
+  const row = p.library.collaborations[0]
+  assert.equal(row.team.length, 4)
+  assert.equal(row.steps.length, 5)
+  assert.ok(Array.isArray(row.environment.packages))
+})
+
+test('L1 自主级别每步要先人工确认；L2 可直接记步骤', async () => {
+  const { svc } = freshService()
+  const c1 = await svc.run({ action: 'collab_create', title: 'L1', autonomy: 'L1' })
+  const s1 = await svc.run({ action: 'collab_step', collabId: c1.collab.id, step: { phase: 'p', decision: 'd', reason: 'r', refs: [] } })
+  assert.equal(s1.ok, false)
+  assert.equal(s1.gate, 'waiting-human')
+  const c2 = await svc.run({ action: 'collab_create', title: 'L2', autonomy: 'L2' })
+  const s2 = await svc.run({ action: 'collab_step', collabId: c2.collab.id, step: { phase: 'p', decision: 'd', reason: 'r', refs: [] } })
+  assert.equal(s2.ok, true)
+  assert.equal(s2.library.collaborations.find(x => x.id === c2.collab.id).steps.length, 1)
+})
+
+test('决策闸门：ask 停 waiting-human，answer 需 human 且恢复 active', async () => {
+  const { svc } = freshService()
+  const c = await svc.run({ action: 'collab_create', title: '决策', autonomy: 'L3' })
+  const cid = c.collab.id
+  const ask = await svc.run({ action: 'collab_decision_ask', collabId: cid, point: '是否装包', payload: { pkg: 'numpy' } })
+  assert.equal(ask.ok, true)
+  assert.ok(ask.decisionId)
+  let row = ask.library.collaborations[0]
+  assert.equal(row.status, 'waiting-human')
+  const noHuman = await svc.run({ action: 'collab_decision_answer', collabId: cid, decisionId: ask.decisionId, choice: 'approve', by: 'agent' })
+  assert.equal(noHuman.ok, false)
+  const answer = await svc.run({ action: 'collab_decision_answer', collabId: cid, decisionId: ask.decisionId, choice: 'approve', by: 'human' })
+  assert.equal(answer.ok, true)
+  row = answer.library.collaborations[0]
+  assert.equal(row.status, 'active')
+  const decided = row.decisions.find(d => d.id === ask.decisionId)
+  assert.equal(decided.pending, false)
+  assert.equal(decided.choice, 'approve')
+  assert.equal(decided.by, 'human')
+})
+
+test('高风险装包闸门：无 approve 停住，approve 后才算放行（不触发真实装包）', async () => {
+  const { svc } = freshService()
+  await svc.run({ action: 'settings', patch: { 'runner.enabled': true, 'runner.nodePath': process.execPath } })
+  const c = await svc.run({ action: 'collab_create', title: '闸门', autonomy: 'L3' })
+  const cid = c.collab.id
+  const blocked = await svc.run({ action: 'collab_run', collabId: cid, title: 't', runtime: 'node', code: 'console.log(1)', packages: ['some-unique-pkg'] })
+  assert.equal(blocked.ok, false)
+  assert.equal(blocked.gate, 'waiting-human')
+  const row1 = blocked.library.collaborations[0]
+  assert.equal(row1.status, 'waiting-human')
+  const inst = row1.decisions.find(d => d.point.indexOf('risk:install:') === 0)
+  assert.ok(inst, '应生成 install 待决')
+  // 闸门状态机：approve 之前 install 不可放行。
+  const lib = await svc.run({ action: 'library' })
+  const before = lib.library.collaborations[0]
+  assert.equal(canProceed(before, 'install').ok, false)
+  assert.equal(before.decisions.find(d => d.id === inst.id).pending, true)
+  await svc.run({ action: 'collab_decision_answer', collabId: cid, decisionId: inst.id, choice: 'approve', by: 'human' })
+  const after = (await svc.run({ action: 'library' })).library.collaborations[0]
+  assert.equal(after.decisions.find(d => d.id === inst.id).pending, false)
+  assert.equal(canProceed(after, 'install').ok, true)
+  // 执行前的 workspace 闸门独立生效：装包 approve 不等于执行 approve。
+  assert.equal(canProceed(after, 'workspace').ok, false, '尚无 workspace 决策时不得执行')
+  const asked = await svc.run({ action: 'collab_decision_ask', collabId: cid, point: 'risk:workspace:执行实验代码' })
+  const waiting = (await svc.run({ action: 'library' })).library.collaborations[0]
+  assert.equal(waiting.status, 'waiting-human')
+  assert.equal(canProceed(waiting, 'workspace').ok, false, 'pending 时不得执行')
+  await svc.run({ action: 'collab_decision_answer', collabId: cid, decisionId: asked.decisionId, choice: 'approve', by: 'human' })
+  const ready = (await svc.run({ action: 'library' })).library.collaborations[0]
+  assert.equal(canProceed(ready, 'install').ok, true)
+  assert.equal(canProceed(ready, 'workspace').ok, true)
+  assert.equal(ready.status, 'active')
+})
+
+test('collab_run 复用执行链并把 runId 写进合作与反向索引', async () => {
+  const { svc } = freshService()
+  await svc.run({ action: 'settings', patch: { 'runner.enabled': true, 'runner.nodePath': process.execPath } })
+  const c = await svc.run({ action: 'collab_create', title: '运行', autonomy: 'L3' })
+  const cid = c.collab.id
+  const first = await svc.run({ action: 'collab_run', collabId: cid, title: 'r', runtime: 'node', code: 'console.log(7)' })
+  assert.equal(first.gate, 'waiting-human')
+  const ws = first.library.collaborations[0].decisions.find(d => d.point.indexOf('risk:workspace:') === 0 && d.pending === true)
+  assert.ok(ws, '执行前应有 workspace 待决')
+  await svc.run({ action: 'collab_decision_answer', collabId: cid, decisionId: ws.id, choice: 'approve', by: 'human' })
+  const r = await svc.run({ action: 'collab_run', collabId: cid, title: 'r', runtime: 'node', code: 'console.log(7)' })
+  assert.equal(r.ok, true)
+  assert.ok(r.runId)
+  const row = r.library.collaborations[0]
+  assert.ok(row.experimentIds.includes(r.runId))
+  assert.equal(r.library.collabByExperiment[r.runId], cid)
+})
+
+test('collab_evaluate 的 verdict 只读复制假说 status，传入 verdict 不生效', async () => {
+  const seed = {
+    papers: [], hypotheses: [{ id: 'h1', title: '假', status: 'supported', rationale: '', gap: '', experiment: '', evidence: [], at: null }],
+    drafts: [], reviews: [],
+    experiments: [{ id: 'e1', title: '实', hypothesisId: 'h1', status: 'done', runtime: 'node', code: '', params: {}, packages: [], artifacts: [], criteria: [], metrics: {}, createdAt: null }],
+    collaborations: [], chat: [], settings: {},
+  }
+  const { svc } = freshService(seed)
+  const c = await svc.run({ action: 'collab_create', title: '评估', autonomy: 'L3' })
+  const e = await svc.run({ action: 'collab_evaluate', collabId: c.collab.id, runId: 'e1', conclusion: '结论', verdict: 'rejected' })
+  assert.equal(e.ok, true)
+  assert.equal(e.evaluation.verdict, 'supported')
+  assert.notEqual(e.evaluation.verdict, 'rejected')
+  assert.match(e.evaluation.verdictSource, /只读复制/)
+  assert.equal(e.library.collaborations[0].evaluation.conclusion, '结论')
+})
+
+test('collab_list 返回 collaborations 与 library', async () => {
+  const { svc } = freshService()
+  await svc.run({ action: 'collab_create', title: 'A' })
+  const r = await svc.run({ action: 'collab_list' })
+  assert.equal(r.ok, true)
+  assert.equal(r.collaborations.length, 1)
+  assert.ok(r.library.collaborations)
+})
+
+test('approval 纯函数：风险判定与权限只降级不升级', async () => {
+  const { canProceed, riskPoint, choosePermission, isHighRisk } = await import('../lib/approval.mjs')
+  assert.equal(isHighRisk('install'), true)
+  assert.equal(isHighRisk('library'), false)
+  assert.match(riskPoint('install', '  a  b '), /^risk:install:a b$/)
+  const noDec = { decisions: [] }
+  assert.equal(canProceed(noDec, 'install').ok, false)
+  const approved = { decisions: [{ point: 'risk:install:x', pending: false, choice: 'approve', by: 'human' }] }
+  assert.equal(canProceed(approved, 'install').ok, true)
+  assert.equal(canProceed(approved, 'workspace').ok, false)
+  assert.deepEqual(choosePermission('read-only', 'danger-full-access'), { applied: 'read-only', upgraded: true })
+  assert.deepEqual(choosePermission('read-only', 'workspace-write'), { applied: 'read-only', upgraded: true })
+  assert.deepEqual(choosePermission('read-only', 'read-only'), { applied: 'read-only', upgraded: false })
+  assert.deepEqual(choosePermission('workspace-write', 'read-only'), { applied: 'read-only', upgraded: false })
+})
+
+test('全局 kelin.role 声明存在；本次合作角色经边界消息注入而非 meta', async () => {
+  assert.ok(SETTING_DEFS.some(d => d.key === 'kelin.role' && d.options && d.options.join(',') === 'lead,methodologist,engineer,analyst'))
+  const injected = []
+  const appliedPerms = []
+  const events = []
+  const createMeta = []
+  const agent = {
+    inject: b => injected.push(b),
+    followup: () => {},
+    whenIdle: async () => {},
+    session: { deriveMessages: () => [] },
+  }
+  const chatCtx = {
+    get: name => name === 'agents' ? { create: async opts => { createMeta.push(opts && opts.meta); if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } } : ctx.get(name),
+    on: () => () => {},
+    permissionPresets: { set: async (sess, name) => { appliedPerms.push(name) } },
+  }
+  process.env.DSH_HOME = join(tempHome, 'case-chat-' + caseIndex++)
+  const chatSvc = createService(chatCtx)
+  const c = await chatSvc.run({ action: 'collab_create', title: '角色', kelinRole: 'analyst' })
+  const stream = { write: (t, d) => events.push([t, d]), close: () => {} }
+  await chatSvc.chatStream({ question: '你好', collabId: c.collab.id, perm: 'danger-full-access' }, stream)
+  const boundary = injected.find(b => Array.isArray(b.content) && String(b.content[0].text).indexOf('本次科灵角色') >= 0)
+  assert.ok(boundary, '应有角色边界消息')
+  assert.match(boundary.content[0].text, /分析师/)
+  assert.match(boundary.content[0].text, /来自本次合作设置/)
+  assert.ok(createMeta.every(m => !m || (!m.kelinRole && !m.role)), '角色不得写进 meta')
+  assert.deepEqual(appliedPerms, ['read-only'])
+  assert.ok(events.some(e => e[0] === 'waiting-human'), '升级请求应产生 waiting-human')
 })

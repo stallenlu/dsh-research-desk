@@ -242,3 +242,81 @@ test('qa: a question with no matching passage never calls the model', async () =
   assert.equal(result.ok, false)
   assert.match(result.answer, /No passage/)
 })
+test('desk: add_collab and update_collab keep structured fields', () => {
+  const state = emptyState()
+  const result = applyOps(state, [{
+    op: 'add_collab',
+    title: '虚拟实验室Phase0落地',
+    goal: { text: '接通 collaborations', source: 'human', createdAt: '2026-01-01T00:00:00.000Z' },
+    team: [{ role: 'engineer', kind: 'kelin', ref: 'kelin-1' }],
+    autonomy: 'L2',
+    kelinRole: 'methodologist',
+    status: 'active',
+    experimentIds: ['e_1'],
+  }])
+  assert.equal(result.errors.length, 0)
+  const collab = state.collaborations[0]
+  assert.ok(collab.id.startsWith('c_'))
+  assert.equal(collab.status, 'active')
+  assert.equal(collab.autonomy, 'L2')
+  assert.equal(collab.kelinRole, 'methodologist')
+  assert.equal(collab.goal.source, 'human')
+  assert.equal(collab.goal.text, '接通 collaborations')
+  assert.equal(collab.team[0].role, 'engineer')
+  assert.deepEqual(collab.experimentIds, ['e_1'])
+  assert.deepEqual(collab.steps, [])
+  assert.deepEqual(collab.decisions, [])
+
+  const upd = applyOps(state, [{ op: 'update_collab', id: collab.id, patch: { title: '改名后的合作', autonomy: 'L3' } }])
+  assert.equal(upd.errors.length, 0)
+  assert.equal(collab.title, '改名后的合作')
+  assert.equal(collab.autonomy, 'L3')
+  assert.ok(collab.updatedAt && typeof collab.updatedAt === 'string')
+})
+
+test('desk: add_collab_step and decide_collab append structured records', () => {
+  const state = emptyState()
+  applyOps(state, [{ op: 'add_collab', title: '步骤测试' }])
+  const collab = state.collaborations[0]
+  const steps = [
+    { phase: 'design', actor: 'kelin', decision: '定方案', reason: '先设计', refs: ['p1'] },
+    { phase: 'build', actor: 'human', decision: '开工', reason: '按计划', refs: ['e1', 'e2'] },
+    { phase: 'review', actor: 'kelin', decision: '复验', reason: '收尾', refs: [] },
+  ]
+  const sr = applyOps(state, steps.map(step => ({ op: 'add_collab_step', collabId: collab.id, step })))
+  assert.equal(sr.errors.length, 0)
+  assert.equal(collab.steps.length, 3)
+  for (const [i, step] of collab.steps.entries()) {
+    assert.ok(step.id.startsWith('s_'))
+    assert.ok(step.at)
+    assert.equal(step.phase, steps[i].phase)
+    assert.deepEqual(step.refs, steps[i].refs)
+  }
+
+  const dr = applyOps(state, [{
+    op: 'decide_collab',
+    collabId: collab.id,
+    decision: { point: '是否继续', choice: '继续', by: 'human', pending: true },
+    status: 'waiting-human',
+  }])
+  assert.equal(dr.errors.length, 0)
+  assert.equal(collab.status, 'waiting-human')
+  assert.equal(collab.decisions.length, 1)
+  assert.ok(collab.decisions[0].id.startsWith('d_'))
+  assert.ok(collab.decisions[0].at)
+  assert.equal(collab.decisions[0].point, '是否继续')
+  assert.equal(collab.decisions[0].pending, true)
+})
+
+test('desk: emptyState and migrateState normalize collaborations array', () => {
+  assert.deepEqual(emptyState().collaborations, [])
+  assert.deepEqual(migrateState({}).collaborations, [])
+  assert.deepEqual(migrateState({ collaborations: 'bad-value' }).collaborations, [])
+})
+
+test('desk: invalid collab status is coerced away and falls back to active', () => {
+  const state = emptyState()
+  applyOps(state, [{ op: 'add_collab', title: '非法状态测试', status: 'nonsense' }])
+  assert.equal(state.collaborations.length, 1)
+  assert.equal(state.collaborations[0].status, 'active')
+})
