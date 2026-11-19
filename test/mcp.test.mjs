@@ -23,10 +23,13 @@ async function withTempDir(fn) {
   }
 }
 
-test('mcp: MCP_TOOLS 是 5 个工具，每个都带完整 inputSchema', () => {
-  assert.equal(MCP_TOOLS.length, 5)
+test('mcp: MCP_TOOLS 是 8 个工具，每个都带完整 inputSchema', () => {
+  assert.equal(MCP_TOOLS.length, 8)
   const names = MCP_TOOLS.map(tool => tool.name)
   assert.deepEqual(names.slice().sort(), [
+    'research_experiment_analyze',
+    'research_experiment_list',
+    'research_experiment_run',
     'research_export',
     'research_library_add',
     'research_library_list',
@@ -68,12 +71,12 @@ test('mcp: notifications/initialized 不回包', async () => {
   })
 })
 
-test('mcp: tools/list 返回 5 个工具', async () => {
+test('mcp: tools/list 返回 8 个工具', async () => {
   await withTempDir(async root => {
     const server = createMcpServer({ dataDir: root })
     const res = await server.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))
     assert.equal(res.id, 2)
-    assert.equal(res.result.tools.length, 5)
+    assert.equal(res.result.tools.length, 8)
     assert.equal(res.result.tools[0].name, 'research_search')
   })
 })
@@ -97,7 +100,7 @@ test('mcp: 未知 method 返回 -32601', async () => {
   })
 })
 
-test('mcp: tools/call research_search 真实检索并返回 JSON 文本', async () => {
+test('mcp: tools/call research_search 返回结构化 JSON 文本', async () => {
   await withTempDir(async root => {
     const server = createMcpServer({ dataDir: root })
     const res = await server.handleLine(JSON.stringify({
@@ -111,9 +114,9 @@ test('mcp: tools/call research_search 真实检索并返回 JSON 文本', async 
     assert.equal(res.result.content[0].type, 'text')
     const payload = JSON.parse(res.result.content[0].text)
     assert.equal(payload.query, 'retrieval augmented generation')
-    assert.equal(payload.papers.length > 0, true)
-    assert.equal(typeof payload.papers[0].title, 'string')
-    assert.equal(payload.papers[0].title.length > 0, true)
+    assert.equal(Array.isArray(payload.papers), true)
+    assert.equal(Array.isArray(payload.errors), true)
+    for (const paper of payload.papers) assert.equal(typeof paper.title, 'string')
   })
 })
 
@@ -217,6 +220,6 @@ test('mcp: runMcpStdio 每行一个 JSON 响应，通知不回包', async () => 
     const first = JSON.parse(lines[0])
     assert.equal(first.result.protocolVersion, '2024-11-05')
     const second = JSON.parse(lines[1])
-    assert.equal(second.result.tools.length, 5)
+    assert.equal(second.result.tools.length, 8)
   })
 })

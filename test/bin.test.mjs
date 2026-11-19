@@ -44,7 +44,8 @@ test('the bin entry point completes the MCP handshake over stdio', async () => {
   assert.equal(replies[0].result.protocolVersion, '2024-11-05')
   assert.deepEqual(
     replies[1].result.tools.map(tool => tool.name),
-    ['research_search', 'research_library_list', 'research_library_add', 'research_library_remove', 'research_export']
+    ['research_search', 'research_library_list', 'research_library_add', 'research_library_remove', 'research_export',
+     'research_experiment_run', 'research_experiment_analyze', 'research_experiment_list']
   )
 })
 
