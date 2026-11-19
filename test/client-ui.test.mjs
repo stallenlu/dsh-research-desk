@@ -28,7 +28,7 @@ test('contract field names and reverse index used, not renamed', () => {
 })
 
 test('three on-demand triggers are clickable affordances', () => {
-  for (const t of ['让科灵验证', '验证这个论点', '交给科灵验证']) {
+  for (const t of ['让科灵验证', '验证这个论点', '虚空验证']) {
     assert.ok(src.includes(t), 'missing trigger ' + t)
   }
 })
@@ -58,4 +58,26 @@ test('void space: advanced lab embeds inline and quick tasks keep gutters', () =
   assert.ok(src.includes('.md-lab-embed{display:block;position:relative'), 'missing inline embed CSS')
   assert.ok(src.includes('.md-collab .md-desk-tasks{padding:0 16px 16px}'), 'quick task cards must keep tile gutters')
   assert.ok(!src.includes("className: 'md-board-page', key: 'lab'"), 'labView must not be a full-page absolute container')
+})
+
+
+test('insights hero follows the discover/void page paradigm', () => {
+  assert.ok(src.includes("className: 'md-page', key: 'insights'"), 'insights root must be md-page')
+  assert.ok(src.includes("className: 'md-page-head', key: 'ph'"), 'insights needs page head')
+  assert.ok(src.includes('md-i-line') && src.includes('正在成形'), 'insights hero headline missing')
+  assert.ok(src.includes('科灵把你记下的灵感、资料与文献'), 'insights hero needs md-muted explainer')
+  assert.ok(src.includes('md-insights-toolshead'), 'system actions must live in a secondary row')
+  assert.ok(src.includes('md-metrics'), 'metrics strip on insights hero')
+})
+
+test('collab verify button uses target icon, not raw CJK text', () => {
+  assert.ok(src.includes("key: 'askcollab', className: 'md-ctool',"), 'verify button must be plain md-ctool icon button')
+  assert.ok(src.includes("I({ name: 'target', size: 13 })"), 'verify button needs target icon')
+  assert.ok(!src.includes("'交给科灵验证'"), 'raw text label must be gone')
+})
+test('high-impact papers use the same card row as to-read list', () => {
+  assert.ok(src.includes("const topLi = (p) => h('div', { className: 'md-desk-feed-row', key: p.id }"), 'topLi must be feed-row card, not ol rank list')
+  assert.ok(src.includes("className: 'md-desk-feed-list', key: 'l' }, topPapers.map(topLi)"), 'top list container must be feed-list')
+  assert.ok(!src.includes("className: 'md-top-rank', key: 'r'"), 'legacy big rank span must be gone')
+  assert.ok(src.includes('.md-i-top .md-desk-feed-row .md-top-title{flex:1;min-width:0}'), 'feed-row title needs ellipsis CSS')
 })
