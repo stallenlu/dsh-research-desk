@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { citeKey, exportBundle, toBibTeX, toJSON, toMarkdown } from '../lib/export.mjs'
+import { citeKey, exportBundle, toBibTeX, toJSON, toMarkdown, toTypst, toLatex } from '../lib/export.mjs'
 
 const PAPER = {
   id: 'p1',
@@ -119,3 +119,36 @@ test('export: Markdown carries the library, the questions, the review and the dr
   assert.ok(md.includes('草稿正文。'))
   assert.ok(md.includes('Run 1'))
 })
+
+test('export: Typst 导出含表格、中文标题与转义，特殊字符不破坏语法', () => {
+  const state = { papers: [{ title: 'A #tag_1 {x}', year: 2024, authors: ['Li Ming'], source: 'arxiv', doi: '10.1/a_b' }], updatedAt: '2026-11-19' }
+  const typ = exportBundle(state, ['typst'])[0]
+  assert.equal(typ.format, 'typst')
+  assert.match(typ.filename, /\.typ$/)
+  assert.ok(typ.content.includes('= 科研工作台导出'))
+  assert.ok(typ.content.includes('#table(columns: 5,'))
+  assert.ok(typ.content.includes('\\#tag\\_1 \\{x\\}'), 'Typst 特殊字符必须转义: ' + typ.content.slice(typ.content.indexOf('#table')))
+  assert.ok(typ.content.includes('导出时间：2026-11-19'))
+})
+
+test('export: LaTeX 导出含导言区、longtable 与转义，特殊字符不破坏语法', () => {
+  const state = { papers: [{ title: 'A $tag_1 & x', year: 2024, authors: ['Li Ming'], source: 'arxiv', doi: '10.1/a_b' }] }
+  const tex = exportBundle(state, ['latex'])[0]
+  assert.equal(tex.format, 'latex')
+  assert.match(tex.filename, /\.tex$/)
+  assert.ok(tex.content.includes('\\documentclass{article}'))
+  assert.ok(tex.content.includes('\\usepackage[UTF8]{ctex}'))
+  assert.ok(tex.content.includes('\\begin{longtable}'))
+  assert.ok(tex.content.includes('\\$tag\\_1 \\& x'), 'LaTeX 特殊字符必须转义: ' + tex.content.slice(tex.content.indexOf('longtable')))
+  assert.ok(tex.content.includes('\\end{document}'))
+})
+
+test('export: bundle 五格式齐全且顺序稳定', () => {
+  const files = exportBundle({ papers: [PAPER] }, ['md', 'bib', 'json', 'typst', 'latex'])
+  assert.deepEqual(files.map(f => f.format), ['md', 'bib', 'json', 'typst', 'latex'])
+  assert.deepEqual(files.map(f => f.filename), [
+    'research-desk-library.md', 'research-desk-library.bib', 'research-desk-library.json',
+    'research-desk-library.typ', 'research-desk-library.tex',
+  ])
+})
+

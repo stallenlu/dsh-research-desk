@@ -126,6 +126,32 @@ test('store: undo does not clobber a later edit of the same row', () => {
   assert.equal(result.papers[0].title, 'newer')
 })
 
+test('store: history lists steps and restore jumps back, dropping later steps as a branch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rd-hist-'))
+  try {
+    const store = new Store(root, migrateState)
+    await store.mutate('add First', draft => { applyOps(draft, [{ op: 'add_paper', paper: { title: 'First' } }]) })
+    await store.mutate('add Second', draft => { applyOps(draft, [{ op: 'add_paper', paper: { title: 'Second' } }]) })
+    await store.mutate('add Third', draft => { applyOps(draft, [{ op: 'add_paper', paper: { title: 'Third' } }]) })
+    const steps = store.history()
+    assert.equal(steps.length, 3)
+    assert.deepEqual(steps.map(s => s.label), ['add First', 'add Second', 'add Third'])
+    assert.ok(steps[0].at)
+    // 回到第 1 步（index 0）之后的状态：只剩 First
+    const back = await store.restore(0)
+    assert.equal(back.ok, true)
+    assert.equal(back.label, 'add First')
+    let state = await store.read()
+    assert.equal(state.papers.length, 1)
+    assert.equal(state.papers[0].title, 'First')
+    // 后续步骤作为分支被丢弃
+    assert.equal(store.history().length, 1)
+    assert.equal((await store.restore(2)).ok, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('qa: tokenize keeps latin words and CJK characters', () => {
   const tokens = tokenize('Transformer 注意力 mechanism')
   assert.ok(tokens.includes('transformer'))
