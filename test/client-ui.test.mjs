@@ -103,6 +103,22 @@ test('high-impact papers use the same card row as to-read list', () => {
   assert.ok(src.includes('.md-i-top .md-desk-feed-list{flex:1;min-height:0;overflow-y:auto'), 'top feed list must scroll internally')
 })
 
+test('dsh-ui spec guard actually rejects malformed cards and passes good ones', () => {
+  const fm = src.match(/function isValidGenuiSpec\(spec\) \{[\s\S]*?\n    \}/)
+  assert.ok(fm, 'guard function source not found')
+  const cm = src.match(/const GENUI_TYPES = [^\n]*\n    const GENUI_TONES = [^\n]*/)
+  assert.ok(cm, 'guard constants not found')
+  const guardFn = new Function(cm[0] + '\n' + fm[0] + '\nreturn isValidGenuiSpec')()
+  const bad = { title: 'x', gap: 12, items: [{ type: 'callout', content: 'a', tone: 'warning' }], type: 'stack', children: [{ type: 'steps', items: [{ label: 'x', status: 'done' }] }] }
+  const good = { title: 'x', gap: 12, items: [{ type: 'steps', steps: ['a', 'b'] }, { type: 'callout', content: 'c', tone: 'success' }] }
+  assert.equal(guardFn(bad), false, 'mixed-DSL card from the report must be rejected')
+  assert.equal(guardFn(good), true, 'well-formed card must pass')
+  assert.ok(src.includes('if (!isValidGenuiSpec(spec)) { setFailed(true); return }'), 'guard must run before mount')
+  assert.ok(src.includes('卡片渲染失败，已收起原始内容'), 'fallback must use friendly copy')
+  assert.ok(src.includes("h('details', { key: 'd' }"), 'fallback must collapse raw JSON')
+  assert.ok(!src.includes("h('pre', { className: 'md-genui-fallback' }, raw)"), 'raw JSON must not be dumped directly')
+})
+
 test('reasoning frames are streamed, accumulated and rendered collapsibly', () => {
   assert.ok(src.includes('let reasoningAcc = \'\''), 'send must accumulate reasoning frames')
   assert.ok(src.includes('if (ev.reasoning) reasoningAcc += ev.text'), 'delta handler must collect reasoning text')
