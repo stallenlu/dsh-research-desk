@@ -12,7 +12,7 @@ test('four-zone testids and empty-state copy present', () => {
   for (const id of ['collab-goal', 'collab-stage', 'collab-needs-decision', 'collab-timeline', 'collab-overview', 'collab-decisions']) {
     assert.ok(src.includes("'data-testid': '" + id + "'"), 'missing testid ' + id)
   }
-  assert.ok(src.includes('这里记录科灵带队的每一次虚拟实验合作，你可以看目标、过程、结果，并在需要时拍板'))
+  assert.ok(src.includes('这里记录科灵在虚空里带队的每一次虚拟实验：看目标、看过程、看结果，需要时你拍板'))
 })
 
 test('all 8 contract collab_* actions are called by the UI', () => {
@@ -34,8 +34,17 @@ test('three on-demand triggers are clickable affordances', () => {
 })
 
 test('lab total entry preserved and collab view dispatched', () => {
-  assert.ok(src.includes("['lab', '合作空间']"))
+  assert.ok(src.includes("['lab', '虚空']"))
   assert.ok(src.includes("view === 'collab' ? collabView"))
+  assert.ok(src.includes("'虚空 · 科灵带队做虚拟实验'"))
+})
+
+test('void space: no object Object leak and md-seg role controls', () => {
+  assert.ok(!/collabTerm\([^)]*\)\s*\+/.test(src), 'collabTerm must be a child, not string-concatenated')
+  assert.ok(src.includes('md-collab-gear-row'), 'missing gear row')
+  assert.ok(src.includes("role: 'radiogroup'"), 'missing md-seg radiogroup')
+  assert.ok(src.includes('md-collab-body'), 'missing unified body wrapper')
+  assert.ok(src.includes('md-hero-copy'), 'missing hero copy wrapper')
 })
 
 test('Phase3 evaluation flows back into content workflow as draft', () => {
