@@ -35,7 +35,7 @@ test('three on-demand triggers are clickable affordances', () => {
 })
 
 test('topics and content tabs merged into one research desk with dual lenses', () => {
-  assert.ok(src.includes("['research', '研究台']"), 'NAV must have single research entry')
+  assert.ok(src.includes("['research', '选题']"), 'NAV must have single research entry')
   assert.ok(!src.includes("['topics', '选题']") && !src.includes("['content', '内容']"), 'old two tabs must be gone')
   assert.ok(src.includes("view === 'research' ? researchView"), 'dispatch must route to researchView')
   assert.ok(src.includes("const researchView = h('div'"), 'researchView must exist')
@@ -44,6 +44,12 @@ test('topics and content tabs merged into one research desk with dual lenses', (
   assert.ok(src.includes("action: 'set_hypothesis_status'"), 'verify-lens drag must call the new action')
   assert.ok(src.includes('写作: '), 'publish-lens cards must prefix writing dimension')
   assert.ok(!src.includes("status: 'outline', source: '选题'"), 'hypothesis must not be hardcoded to outline')
+})
+test('NAV order follows the product funnel: 灵感→资料→选题→虚空→文风→排期→复盘', () => {
+  const m = src.match(/const NAV = (\[.*\])/)
+  assert.ok(m, 'NAV declaration not found')
+  const ids = [...m[1].matchAll(/\['([a-z]+)', '[^']+'\]/g)].map(x => x[1])
+  assert.deepEqual(ids, ['home', 'discover', 'research', 'lab', 'style', 'schedule', 'insights'])
 })
 test('set_hypothesis_status action is fully wired in host', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
