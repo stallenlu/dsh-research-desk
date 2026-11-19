@@ -37,3 +37,9 @@ test('lab total entry preserved and collab view dispatched', () => {
   assert.ok(src.includes("['lab', '合作空间']"))
   assert.ok(src.includes("view === 'collab' ? collabView"))
 })
+
+test('Phase3 evaluation flows back into content workflow as draft', () => {
+  assert.ok(src.includes('回流成草稿'), 'missing flow-back button label')
+  assert.ok(src.includes('flowBackToDraft'), 'missing flow-back helper')
+  assert.ok(src.includes("action: 'draft', instruction: instruction"), 'draft action not wired with instruction')
+})
