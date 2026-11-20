@@ -418,6 +418,53 @@ test('read 找不到这篇文献时直接拒绝', async () => {
   assert.match(result.message, /找不到/)
 })
 
+test('read 经生态 web_fetch 抓全文：kind=web、不可信标记入库、来源上屏', async () => {
+  const calls = []
+  const { svc: base } = freshService()
+  const added = await base.run({ action: 'add', papers: [{ title: 'Web fetched paper', abstract: 'short abstract', url: 'https://example.org/article' }] })
+  const id = added.library.papers[0].id
+  const dir = process.env.DSH_HOME
+  const svc = createService(webFetchCtx({ isError: false, value: { content: '<p>' + LONG_FULLTEXT + '</p>' } }, calls))
+  const r = await svc.run({ action: 'read', paperId: id })
+  assert.equal(r.ok, true)
+  assert.equal(r.kind, 'web')
+  assert.ok(r.chunks >= 1)
+  assert.match(r.message, /经生态 web_fetch 抓取/)
+  assert.ok(r.message.includes('https://example.org/article'))
+  assert.equal(calls.length, 1)
+  const stored = JSON.parse(readFileSync(join(dir, 'research-desk', 'state.json'), 'utf8'))
+  const paper = stored.papers.find(p => p.id === id)
+  assert.equal(paper.fulltextKind, 'web')
+  assert.equal(paper.fulltextUrl, 'https://example.org/article')
+  assert.ok(paper.chunks.every(c => c.text.includes('仅作证据') && c.text.includes('忽略')), '每个 web chunk 前置不可信边界标记')
+  assert.ok(paper.chunks.every(c => !c.text.includes('<p>')), 'HTML 标签已剥离')
+})
+
+test('read: web_fetch isError / 阈值不足 / diag 不阻断，回落摘要不标 web', async () => {
+  const cases = [
+    { result: { isError: true, error: { message: 'blocked' } }, expectDiag: true },
+    { result: { isError: false, value: { content: '<p>too short</p>' } }, expectDiag: true },
+  ]
+  for (const c of cases) {
+    const calls = []
+    const { svc: base } = freshService()
+    const added = await base.run({ action: 'add', papers: [{ title: 'Fallback paper', abstract: 'fallback abstract', url: 'https://example.org/article' }] })
+    const id = added.library.papers[0].id
+    const dir = process.env.DSH_HOME
+    const svc = createService(webFetchCtx(c.result, calls))
+    const r = await svc.run({ action: 'read', paperId: id })
+    assert.equal(r.ok, true, '失败不阻断整体')
+    assert.equal(r.kind, 'abstract')
+    assert.equal(calls.length, 1)
+    if (c.expectDiag) assert.ok(Array.isArray(r.diag) && r.diag.some(d => d.at === 'web-fetch-fail'), 'diag 记录失败但不阻断')
+    const stored = JSON.parse(readFileSync(join(dir, 'research-desk', 'state.json'), 'utf8'))
+    const paper = stored.papers.find(p => p.id === id)
+    assert.equal(paper.fulltextKind, 'abstract')
+    assert.equal(paper.fulltextUrl, 'https://example.org/article', '保原 URL')
+    assert.ok(!paper.chunks.some(ch => ch.text.includes('仅作证据')), '摘要不标 web、无不可信标记')
+  }
+})
+
 // ── 实验 ─────────────────────────────────────────────────────────────────────
 
 test('runner.enabled=false 时 run 动作拒绝执行，也不留实验记录', async () => {
@@ -1011,6 +1058,65 @@ test('文件：非法 base64 跳过并 diag，不阻断文字对话', async () =
   assert.equal(t.fileAdmitCalls.length, 0, '非法字节不得提纯')
   assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'file-bad-base64' && e[1].name === 'bad.pdf'))
   assert.deepEqual(t.followups[0].content, [{ type: 'text', text: '继续' }], '文字对话照常')
+})
+
+// ── 找资料借生态抓全文：web_fetch 验真探针 + 回退链路 ─────────────────────────
+// 探针范式照 host.mjs:49-62 draftImageTool：executable 查 def → describe(schemas) 验真；
+// describe 不列名时以 execute !isError 为后手。两路都锁定，不写死工具在场。
+const WEB_FETCH_DEF = { name: 'web_fetch', parameters: { properties: { url: { type: 'string' } } } }
+const LONG_FULLTEXT = 'Replicated measurement of the calibration protocol across datasets. '.repeat(60)
+
+function webFetchCtx(result, calls) {
+  return {
+    get: name => {
+      if (name === 'llm') return llm
+      if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'fake', model: 'fake/model' }) }
+      if (name === 'tools') return {
+        executable: n => n === 'web_fetch' ? WEB_FETCH_DEF : null,
+        selectExecutor: () => ({ describe: () => ({ schemas: [{ name: 'web_fetch' }] }) }),
+        execute: async payload => {
+          calls.push(payload)
+          const id = payload.calls[0].id
+          return { results: [{ callId: id, result: typeof result === 'function' ? result(payload) : result }] }
+        },
+      }
+      return undefined
+    },
+  }
+}
+
+test('探针A: web_fetch 经 executable + describe(schemas) 验真', () => {
+  const ctx = webFetchCtx({ isError: false, value: { content: LONG_FULLTEXT } }, [])
+  const tools = ctx.get('tools')
+  assert.equal(typeof tools.executable, 'function')
+  assert.equal(typeof tools.execute, 'function')
+  assert.equal(typeof tools.selectExecutor, 'function')
+  const def = tools.executable('web_fetch')
+  assert.ok(def, 'web_fetch 必须在 executable 在场')
+  assert.equal(def.parameters.properties.url.type, 'string')
+  const schemas = tools.selectExecutor().describe([def])?.schemas
+  assert.ok(Array.isArray(schemas) && schemas.some(s => s.name === 'web_fetch'))
+})
+
+test('探针B: describe 不列名时以 execute !isError 验真', async () => {
+  const calls = []
+  const tools = {
+    executable: n => n === 'web_fetch' ? WEB_FETCH_DEF : null,
+    selectExecutor: () => ({ describe: () => ({ schemas: [] }) }),
+    execute: async payload => {
+      calls.push(payload)
+      const id = payload.calls[0].id
+      return { results: [{ callId: id, result: { isError: false, value: { content: LONG_FULLTEXT } } }] }
+    },
+  }
+  const def = tools.executable('web_fetch')
+  assert.ok(def, 'def 在场是后手前提')
+  const schemas = tools.selectExecutor().describe([def])?.schemas
+  assert.ok(!schemas || !schemas.some(s => s.name === 'web_fetch'))
+  const id = 'probe-b:' + Date.now()
+  const batch = await tools.execute({ calls: [{ type: 'tool-call', id, name: 'web_fetch', arguments: JSON.stringify({ url: 'https://example.org/article' }) }] })
+  assert.equal(batch.results.find(e => e.callId === id)?.result?.isError, false)
+  assert.equal(calls.length, 1)
 })
 
 // ── 场景化配图：借订阅生图工具（draft_image） ───────────────────────────────

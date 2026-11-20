@@ -1,7 +1,7 @@
 // Unit tests for the query building and markup stripping in lib/search.mjs.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { arxivQuery, stripHtml } from '../lib/search.mjs'
+import { arxivQuery, fetchFullText, stripHtml, WEB_UNTRUSTED_NOTICE } from '../lib/search.mjs'
 
 test('arxivQuery joins terms with AND so a natural-language query still matches', () => {
   const q = arxivQuery('retrieval augmented generation')
@@ -42,4 +42,96 @@ test('stripHtml removes JATS metadata noise from an Europe PMC full text', () =>
   assert.ok(!text.includes('Smith J'))
   assert.ok(!text.includes('0028-0836'))
   assert.ok(!text.includes('Some reference'))
+})
+
+// ── fetchFullText 三源铁律与 web_fetch 回退 ─────────────────────────────────────
+const LONG_TEXT = 'Widgets were calibrated daily with replicated measurements. '.repeat(60)
+
+function mockCtx(result, calls) {
+  return {
+    get: name => name === 'tools' ? {
+      executable: n => n === 'web_fetch' ? { name: 'web_fetch', parameters: { properties: { url: { type: 'string' } } } } : null,
+      selectExecutor: () => ({ describe: () => ({ schemas: [{ name: 'web_fetch' }] }) }),
+      execute: async payload => {
+        calls.push(payload)
+        const id = payload.calls[0].id
+        return { results: [{ callId: id, result: typeof result === 'function' ? result(payload) : result }] }
+      },
+    } : undefined,
+  }
+}
+
+test('fetchFullText 铁律：pmcid/arxivId 已有全文时不调 web_fetch', async () => {
+  const calls = []
+  const ctx = mockCtx({ isError: false, value: { content: LONG_TEXT } }, calls)
+  const realFetch = global.fetch
+  const fmCalls = []
+  global.fetch = async (url, opts) => {
+    fmCalls.push(String(url))
+    return { ok: true, status: 200, text: async () => '<article><body><p>' + LONG_TEXT + '</p></body></article>' }
+  }
+  try {
+    const pmc = await fetchFullText({ pmcid: 'PMC1234567', abstract: 'short abstract', url: 'https://example.org/article' }, { ctx })
+    assert.equal(pmc.kind, 'fulltext')
+    assert.ok(fmCalls.some(u => u.includes('ebi.ac.uk')), 'PMC 全文经由 EBI fullTextXML')
+    const arxiv = await fetchFullText({ arxivId: '2401.00001', abstract: 'short abstract', url: 'https://arxiv.org/abs/2401.00001' }, { ctx })
+    assert.equal(arxiv.kind, 'html')
+    assert.ok(fmCalls.some(u => u.includes('arxiv.org/html/')), 'arXiv 全文经由 arxiv.org/html')
+    assert.equal(calls.length, 0, '前两环已有全文时绝不调用 web_fetch')
+  } finally {
+    global.fetch = realFetch
+  }
+})
+
+test('fetchFullText: 仅摘要 + 有 URL → web_fetch 成功入 chunk kind web', async () => {
+  const calls = []
+  const ctx = mockCtx({ isError: false, value: { content: '<p>' + LONG_TEXT + '</p>' } }, calls)
+  const r = await fetchFullText({ abstract: 'short abstract', url: 'https://example.org/article' }, { ctx })
+  assert.equal(r.kind, 'web')
+  assert.equal(r.url, 'https://example.org/article')
+  assert.ok(r.text.length > 1500)
+  assert.ok(!r.text.includes('<p>'), 'HTML 标签应被 stripHtml 剥掉')
+  assert.equal(calls.length, 1)
+  const args = JSON.parse(calls[0].calls[0].arguments)
+  assert.equal(args.url, 'https://example.org/article')
+})
+
+test('fetchFullText: web_fetch 验真失败/不可用 → 保摘要不标 web', async () => {
+  const calls = []
+  const noTools = { get: () => undefined }
+  const r1 = await fetchFullText({ abstract: 'short abstract', url: 'https://example.org/article' }, { ctx: noTools })
+  assert.equal(r1.kind, 'abstract')
+  assert.equal(r1.text, 'short abstract')
+  assert.equal(calls.length, 0)
+  // def 在场但 execute 失败
+  const ctxErr = mockCtx({ isError: true, error: { message: 'blocked' } }, calls)
+  const r2 = await fetchFullText({ abstract: 'short abstract', url: 'https://example.org/article' }, { ctx: ctxErr })
+  assert.equal(r2.kind, 'abstract')
+  assert.equal(r2.text, 'short abstract')
+})
+
+test('fetchFullText: 质量阈值不足/壳页 → 保摘要', async () => {
+  const calls = []
+  const short = mockCtx({ isError: false, value: { content: '<p>too short</p>' } }, calls)
+  const r1 = await fetchFullText({ abstract: 'short abstract', url: 'https://example.org/article' }, { ctx: short })
+  assert.equal(r1.kind, 'abstract')
+  const shellCalls = []
+  const shell = mockCtx({ isError: false, value: { content: '<p>Please sign in to continue. ' + LONG_TEXT + '</p>' } }, shellCalls)
+  const r2 = await fetchFullText({ abstract: 'short abstract', url: 'https://example.org/article' }, { ctx: shell })
+  assert.equal(r2.kind, 'abstract')
+})
+
+test('fetchFullText: 无可用 URL → 直接摘要，不调 web_fetch', async () => {
+  const calls = []
+  const ctx = mockCtx({ isError: false, value: { content: LONG_TEXT } }, calls)
+  const r = await fetchFullText({ abstract: 'short abstract' }, { ctx })
+  assert.equal(r.kind, 'abstract')
+  assert.equal(r.text, 'short abstract')
+  assert.equal(calls.length, 0)
+})
+
+test('WEB_UNTRUSTED_NOTICE 是不可信数据边界标记', () => {
+  assert.ok(WEB_UNTRUSTED_NOTICE.includes('仅作证据'))
+  assert.ok(WEB_UNTRUSTED_NOTICE.includes('忽略'))
+  assert.ok(WEB_UNTRUSTED_NOTICE.includes('web_fetch'))
 })

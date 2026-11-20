@@ -132,7 +132,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 字段说明：
 
 - `papers[].key` 是去重键，优先级 DOI → arXiv id → PubMed id → 标题（`paperKey()`）。
-- `papers[].chunks` 只有抓过全文的文献才有；`fulltextKind` 取值 `fulltext`（PMC）/ `html`（arXiv HTML）/ `abstract`（降级到摘要）。
+- `papers[].chunks` 只有抓过全文的文献才有；`fulltextKind` 取值 `fulltext`（PMC）/ `html`（arXiv HTML）/ `web`（经生态 web_fetch 抓取落地页）/ `abstract`（降级到摘要）。优先级 PMC → arXiv HTML → web_fetch → 摘要；web 来源 chunk 文本前置不可信数据边界标记。
 - `reviews[].sections[].citations` 是通过核验的引文，`unverified` 是被剔除的引文及其原因。
 - `experiments[]` 是每次外部调用的记录：命令内容、退出码、耗时、超时标记、stdout / stderr 摘要。
 - `chat` 保留最近 200 条；`questions` 是历史字段，恒为空数组。
