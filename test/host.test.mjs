@@ -158,10 +158,98 @@ test('status 与 models 两个动作都返回 ok', async () => {
   assert.equal(status.count, 0)
   assert.match(status.message, /fake\/fake\/model/)
 
+  // status 新增命令目录 + 权限结构：复用工具注册处的 ACTIONS 枚举与描述。
+  const reg = { tool: null }
+  apply({
+    get: ctx.get,
+    effect: () => {},
+    on: () => () => {},
+    webServer: { register: () => {} },
+    tools: { register: def => { reg.tool = def } },
+  })
+  const actions = reg.tool.parameters.properties.action.enum
+  const descriptions = reg.tool.parameters.properties.action.description
+  assert.ok(Array.isArray(status.commands))
+  assert.equal(status.commands.length, actions.length)
+  for (let i = 0; i < actions.length; i++) {
+    assert.equal(status.commands[i].action, actions[i])
+    assert.equal(status.commands[i].description, descriptions[i])
+    assert.ok(typeof status.commands[i].description === 'string' && status.commands[i].description.length > 0)
+  }
+  assert.deepEqual(status.perm, {
+    current: 'read-only',
+    applied: 'read-only',
+    labels: { 'read-only': '仅可查看', 'workspace-write': '工作区修改', 'danger-full-access': '完全权限' },
+    upgradable: true,
+    note: '按只读闸门运行；选高档仅记偏好，高风险须人工拍板',
+  })
+
   const models = await svc.run({ action: 'models' })
   assert.equal(models.ok, true)
   assert.equal(models.action, 'models')
   assert.deepEqual(models.models, [{ provider: 'fake', model: 'fake/model', label: 'fake/model' }])
+})
+
+test('collab_stream 落库消息带 usageText，done 帧带 perm', async () => {
+  const events = []
+  const agent = {
+    inject: () => {},
+    followup: () => {},
+    whenIdle: async () => {},
+    session: { deriveMessages: () => [{ role: 'assistant', content: '带队完成' }] },
+    model: { current: () => ({ provider: 'fake', model: 'fake/model' }) },
+  }
+  const appliedPerms = []
+  const streamCtx = {
+    get: name => name === 'agents' ? { create: async opts => { if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } } : ctx.get(name),
+    on: () => () => {},
+    permissionPresets: {
+      set: async (sess, v) => { appliedPerms.push(v) },
+      get: () => 'read-only',
+    },
+  }
+  process.env.DSH_HOME = join(tempHome, 'case-collab-stream-' + caseIndex++)
+  const svc = createService(streamCtx)
+  const collab = await svc.run({ action: 'collab_create', title: '带队', autonomy: 'L3' })
+  const stream = { write: (t, d) => events.push([t, d]), close: () => {} }
+  await svc.collabStream({ collabId: collab.collab.id, goal: '验证 usageText 与 perm' }, stream)
+  const done = events.find(e => e[0] === 'done')
+  assert.ok(done, '应有 done 帧')
+  assert.equal(done[1].perm, 'read-only')
+  assert.match(done[1].usageText, /耗时/)
+  const statePath = join(process.env.DSH_HOME, 'research-desk', 'state.json')
+  const saved = JSON.parse(readFileSync(statePath, 'utf8'))
+  const rows = saved.chat || []
+  const last = rows[rows.length - 1]
+  assert.ok(last, '应落库一条合作对话')
+  assert.equal(last.usageText, done[1].usageText)
+  assert.deepEqual(appliedPerms, ['read-only'])
+})
+test('status 在无 permissionPresets getter 时 applied 回落 read-only 且原字段不变', async () => {
+  const { svc } = freshService()
+  const status = await svc.run({ action: 'status' })
+  assert.equal(status.ok, true)
+  assert.equal(status.action, 'status')
+  assert.equal(status.count, 0)
+  assert.equal(status.perm.applied, 'read-only')
+  assert.equal(status.perm.current, 'read-only')
+  assert.ok(Array.isArray(status.commands))
+})
+test('status 在 permissionPresets getter 抛错时仍 ok 且 applied 回落 read-only', async () => {
+  const dir = join(tempHome, 'case-status-throwing-getter-' + caseIndex++)
+  mkdirSync(dir, { recursive: true })
+  process.env.DSH_HOME = dir
+  const throwingCtx = {
+    get: ctx.get,
+    get permissionPresets() { throw new Error('cannot get property "permissionPresets" without inject') },
+  }
+  const svc = createService(throwingCtx)
+  const status = await svc.run({ action: 'status' })
+  assert.equal(status.ok, true)
+  assert.equal(status.action, 'status')
+  assert.equal(status.perm.applied, 'read-only')
+  assert.equal(status.perm.current, 'read-only')
+  assert.ok(Array.isArray(status.commands))
 })
 
 test('不认识的动作被拒绝，不会走进任何分支', async () => {

@@ -754,4 +754,83 @@ test('靠左修正：.md-composer-native 覆盖基类 align-items:flex-end，附
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(rule), 'CSS fix must not introduce hardcoded hex')
 })
 
+// ---- 批次1+2 client 侧 UI 契约：footer / 盾牌 / 命令目录 / 靠左回归 / 零新增 hex ----
+const js = src
+
+test('批次1 assistant footer: h(footer) 在正文下方，复制与用量仍在，m.at 时渲染 md-msg-time', () => {
+  const aiAt = js.indexOf("h('div', { className: 'md-msg-ai', key: 'ai' }")
+  assert.ok(aiAt > 0, 'assistant md-msg-ai block must exist')
+  const block = js.slice(aiAt, js.indexOf('\n', aiAt))
+  const footerAt = block.indexOf("h('footer', { key: 'foot' },")
+  assert.ok(footerAt > 0, 'assistant message must render a real h(footer)')
+  const bodyAt = block.indexOf('renderRichText(p.text)')
+  assert.ok(bodyAt > 0 && bodyAt < footerAt, 'footer must sit after the splitFences body, below the message')
+  assert.ok(block.indexOf("key: 'copy'") > footerAt, 'copy F must be moved into the footer')
+  assert.ok(block.indexOf("key: 'usage'") > footerAt, 'usage div.md-muted must be moved into the footer')
+  assert.ok(block.includes("m.at ? h('span', { className: 'md-msg-time', key: 'time' }, chatRelativeTime(m.at)) : null"), 'md-msg-time must render only when m.at exists')
+  assert.ok(block.includes("key: 'reason'") && block.includes("key: 'tooltrace'"), 'reasoning/toolTrace details must remain')
+  assert.ok(block.includes('navigator.clipboard.writeText(text)') && block.includes("document.execCommand('copy')"), 'clipboard+textarea fallback logic must remain untouched')
+  const cssFooterAt = js.indexOf('.md-msg footer { display: flex;')
+  assert.ok(cssFooterAt > 0, 'dead .md-msg footer CSS rule must be reused')
+  assert.ok(js.slice(cssFooterAt, cssFooterAt + 180).includes('justify-content: space-between'), 'footer must split left copy / right usage·time')
+})
+
+test('批次1 composer 工具行有可见盾牌 indicator，文案含「当前只读」且只进权限页', () => {
+  const toolsAt = js.indexOf("h('div', { className: 'md-composer-tools'")
+  assert.ok(toolsAt > 0, 'composer tools row must exist')
+  const block = js.slice(toolsAt, toolsAt + 3600)
+  assert.ok(block.includes("key: 'permind'"), 'shield/perm indicator must live in the composer tools row')
+  assert.ok(block.includes("' · 当前只读'"), 'indicator text must contain 当前只读')
+  assert.ok(block.includes("I({ name: 'gear', size: 12 })"), 'must reuse existing gear icon, no new SVG')
+  assert.ok(block.includes("setSettingsPage('perm'); setSettingsPanelOpen(v => !v)"), 'click must open perm settings page, never elevate')
+  assert.ok(block.includes('不会立刻提权'), 'perm wording must preserve 选更高档只是记下偏好/不会立刻提权')
+  assert.ok(js.includes('默认只能查看。选更高档只是记下你的偏好，不会立刻提权：科灵每次调用工具仍要你在决策区点头，实际按只读运行；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
+})
+
+test('批次2 +号命令目录：渲染 status.commands，只读 action 直接 call，写 action 只填提示', () => {
+  assert.ok(js.includes("const READONLY_CMDS = ['status', 'models', 'settings', 'stats', 'library', 'history', 'experiments', 'collab_list']"), 'read-only action whitelist must be explicit')
+  assert.ok(js.includes("const r = await call({ action: 'status' })") && js.includes('Array.isArray(r && r.commands) ? r.commands : []'), 'catalog must read commands from status response')
+  assert.ok(js.includes("F({ key: 'cmdcatalog', icon: 'plus', size: 13, className: 'md-ctool', label: '命令目录', onClick: openCommandMenu })"), 'composer + button must be distinct from top new-chat plus')
+  assert.ok(js.includes("cmdCatalog.filter(function (c) { return c && c.action }).map(function (c, ci)"), 'every listed item must map to a real action')
+  assert.ok(js.includes("className: 'md-chatmenu md-cmdmenu'") && js.includes('cmdMenuOpen ? h('), 'overlay must reuse md-chatmenu visual syntax')
+  assert.ok(js.includes('if (READONLY_CMDS.indexOf(act) >= 0) {'), 'write actions must never be called directly')
+  assert.ok(js.includes('【需参数】') && js.includes('不会直接执行，请补全后自行发送'), 'write/param actions must only fill a marked hint into composer')
+  const toolsAt = js.indexOf("h('div', { className: 'md-composer-tools'")
+  const block = js.slice(toolsAt, toolsAt + 4200)
+  const visionAt = block.indexOf("key: 'vision'")
+  const permAt = block.indexOf("key: 'permind'")
+  const plusAt = block.indexOf("key: 'cmdcatalog'")
+  assert.ok(visionAt >= 0 && permAt > visionAt && plusAt > permAt, 'tool row order must be 插件功能｜权限设置｜+号')
+})
+
+test('批次2 输出侧靠左回归：注释锁定附件条靠左，不改 align-items:stretch，不新增输出侧回显', () => {
+  const previewsAt = js.indexOf("className: 'md-vision-previews'")
+  assert.ok(previewsAt > 0, 'md-vision-previews render site must exist')
+  const around = js.slice(previewsAt - 320, previewsAt)
+  assert.ok(around.includes('align-items:stretch') && around.includes('DSH 原生'), 'comment must note attach bar left-aligns to DSH native')
+  const at = js.indexOf('.md-composer-native{')
+  const rule = js.slice(at, js.indexOf('}', at))
+  assert.ok(rule.includes('align-items:stretch'), 'align-items:stretch must remain untouched')
+  const aiAt = js.indexOf("h('div', { className: 'md-msg-ai', key: 'ai' }")
+  const aiBlock = js.slice(aiAt, js.indexOf('\n', aiAt))
+  assert.ok(!aiBlock.includes('md-vision-previews') && !aiBlock.includes('md-file-card'), 'no output-side image/file echo in assistant message')
+})
+
+test('批次1+2 零新增硬编码 hex：本次新增片段不含任何 #RRGGBB 字面量', () => {
+  const addedRanges = []
+  const pushSlice = (startMarker, endMarker) => {
+    const a = js.indexOf(startMarker)
+    const b = js.indexOf(endMarker, a)
+    if (a > 0 && b > a) addedRanges.push(js.slice(a, b))
+  }
+  pushSlice('// 命令目录（+号）', 'const [renameChatId')
+  pushSlice('const READONLY_CMDS', '// 图片白名单')
+  pushSlice('// 权限设置入口：盾牌 indicator', 'cmdMenuOpen ? h(')
+  pushSlice('cmdMenuOpen ? h(', ']) : null,')
+  assert.ok(addedRanges.length === 4, 'all four new code ranges must be located')
+  for (const r of addedRanges) {
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(r), 'new UI code must not add hardcoded hex color')
+  }
+})
+
 
