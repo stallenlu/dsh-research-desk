@@ -617,7 +617,7 @@ test('识图前端：识图按钮可用、不再标注未接入', () => {
   assert.ok(src.includes('visionInputRef.current && visionInputRef.current.click()'), 'vision button must open the image picker')
   assert.ok(src.includes("accept: 'image/png,image/jpeg,image/webp,image/gif'"), 'hidden image input must accept image types only')
   assert.ok(src.includes('FileReader') && src.includes('readAsDataURL'), 'images must be read as base64 data URL')
-  assert.ok(src.includes('images: (images || []).map'), 'send payload must carry images')
+  assert.ok(src.includes('images: imagePayload'), 'send payload must carry images')
   assert.ok(src.includes('library.activeChatId])') && src.includes(', images, rdDocs,'), 'send deps must include images')
 })
 
@@ -660,6 +660,73 @@ test('成稿页默认体裁为 article，后端 ask 调用链保持不变', () =
   assert.ok(src.includes("(studioFormat === 'article' ? '短文' : '研究快报')"), 'draftStudio ask prompt must keep 短文/研究快报 mapping verbatim')
   assert.ok(src.includes("'基于这份草稿继续修改（'+t+'）：'+studioDraft"), 'refineStudio ask prompt must stay verbatim')
   assert.ok(src.includes("'初稿 ' + studioDraft.length + ' 字'"), 'hero word count must come from real studioDraft.length')
+})
+
+// 粘贴附件：对齐 DSH 原生会话——Ctrl+V 把图/文件放到输入框上方，纯文本照常输入
+test('粘贴入口：textarea 有 onPaste，仅剪贴板带文件时拦截，纯文本照常输入', () => {
+  assert.ok(src.includes('onPaste: onComposerPaste'), 'textarea must wire the paste handler')
+  assert.ok(src.includes("const onComposerPaste = e => {"), 'paste handler must exist')
+  assert.ok(src.includes("const dt = e.clipboardData || (e.nativeEvent && e.nativeEvent.clipboardData)"), 'paste handler must read clipboardData')
+  assert.ok(src.includes("const clipboardFiles = dataTransfer => {"), 'must extract File entries through a dedicated clipboard reader')
+  assert.ok(src.includes("if (!it || it.kind !== 'file') continue"), 'non-file clipboard items (text/html) must be skipped')
+  assert.ok(src.includes("if (!out.length && dataTransfer.files && dataTransfer.files.length)"), 'must fall back to dataTransfer.files')
+  const handler = src.slice(src.indexOf("const onComposerPaste = e => {"), src.indexOf('const removeImage = id =>'))
+  const returnAt = handler.indexOf('if (!files.length) return')
+  const preventAt = handler.indexOf('e.preventDefault()')
+  assert.ok(returnAt > 0 && preventAt > returnAt, 'plain-text paste must NOT be prevented: early return comes before preventDefault')
+})
+
+test('粘贴分流：图片进识图队列、文档进资料登记、不支持类型给克制提示', () => {
+  assert.ok(src.includes("const intakeFiles = fileList => {"), 'must route pasted files by type')
+  assert.ok(src.includes("if (IMAGE_MIME.indexOf(mt) >= 0) { imageFiles.push(f); continue }"), 'images must route to the image queue')
+  assert.ok(src.includes("if (DOC_EXT[ext]) { docFiles.push(f); continue }"), 'documents must route to the pending-doc queue')
+  assert.ok(src.includes("if (imageFiles.length) pickImages(imageFiles)"), 'image branch must feed pickImages')
+  assert.ok(src.includes("if (docFiles.length) ingestRdDocs(docFiles, true)"), 'doc branch must register docs as pending')
+  assert.ok(src.includes("这类文件暂时放不进来，可用图片或 PDF / Word / PPT / Excel / txt / md。"), 'unsupported types must get one restrained plain-language hint')
+  assert.ok(src.includes("...(markPending ? { composerPending: true } : {})"), 'pending marker must be added without changing the doc row shape')
+})
+
+test('附件条位置：图片缩略图与文件卡片都在输入框上方（对齐原生 DOM 顺序）', () => {
+  const formAt = src.indexOf("h('form', { className: 'md-composer md-composer-native'")
+  const textareaAt = src.indexOf("h('textarea', { key: 'ta'", formAt)
+  const previewsAt = src.indexOf("h('div', { className: 'md-vision-previews'", formAt)
+  const fileCardAt = src.indexOf("className: 'md-file-card'", formAt)
+  assert.ok(formAt > 0 && textareaAt > formAt, 'composer form and textarea must exist')
+  assert.ok(previewsAt > formAt && previewsAt < textareaAt, 'attachment rail must be rendered BEFORE the textarea, not below it')
+  assert.ok(fileCardAt > previewsAt && fileCardAt < textareaAt, 'file cards must live inside that rail, above the textarea')
+  assert.ok(src.includes("(images.length || rdDocs.some(x => x.composerPending))"), 'rail must show only when something is pending')
+})
+
+test('两阶段预览：选中即 blob 缩略图，发送才读字节，移除/完成释放 URL', () => {
+  assert.ok(src.includes("previewUrl: (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(file) : ''"), 'selection must create a blob preview URL immediately')
+  assert.ok(src.includes("src: img.previewUrl || ('data:' + img.mediaType + ';base64,' + img.data)"), 'thumbnail must prefer the blob URL, fall back to base64')
+  assert.ok(src.includes("revokeObjectURL(hit.previewUrl)"), 'removeImage must revoke the blob URL')
+  assert.ok(src.includes("images.forEach(x => { if (x.previewUrl && typeof URL !== 'undefined' && URL.revokeObjectURL)"), 'completed send must revoke all preview URLs')
+  assert.ok(src.includes("h('button', { type: 'button', className: 'md-vision-remove'"), 'each attachment must carry a remove button')
+  assert.ok(src.includes("onClick: () => removeRdDoc(doc.id)"), 'file cards must be removable')
+  assert.ok(src.includes("const removeRdDoc = id => setRdDocs(prev => prev.filter(x => x.id !== id))"), 'removeRdDoc must actually drop the row')
+})
+
+test('识图 payload：发送时读出的 data 是纯 base64，不带 data: 前缀', () => {
+  assert.ok(src.includes("const readImageBase64 = img => new Promise(resolve => {"), 'byte reading must happen at send time')
+  assert.ok(src.includes("resolve(comma >= 0 ? raw.slice(comma + 1) : '')"), 'must strip the dataURL prefix before sending')
+  assert.ok(src.includes("const imagePayload = await Promise.all((images || []).map(async x => ({ name: x.name, mediaType: x.mediaType, data: await readImageBase64(x) })))"), 'send must await real bytes before building payload')
+  assert.ok(src.includes("images: imagePayload,"), 'payload must carry the resolved image bytes')
+  const block = src.slice(src.indexOf('const imagePayload ='), src.indexOf('images: imagePayload,'))
+  assert.ok(!block.includes("'data:'"), 'image payload must never contain a data: prefix')
+})
+
+test('文件卡片：扩展徽标+文件名+大小，复用语义 class 且不新增硬编码色值', () => {
+  assert.ok(src.includes("className: 'md-file-badge'"), 'card must show an extension badge')
+  assert.ok(src.includes("String(doc.type || 'file').toUpperCase().slice(0, 4)"), 'badge must show the uppercase extension')
+  assert.ok(src.includes("className: 'md-file-name'"), 'card must show the file name')
+  assert.ok(src.includes("className: 'md-file-size'"), 'card must show the file size')
+  const cssStart = src.indexOf("'.md-file-card{")
+  assert.ok(cssStart > 0, 'file-card CSS must be defined')
+  const cssEndName = src.indexOf("'.md-file-size{", cssStart)
+  const cssEnd = src.indexOf("',\n", cssEndName)
+  const css = src.slice(cssStart, cssEnd)
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css), 'new card CSS must use semantic tokens, not hardcoded hex')
 })
 
 
