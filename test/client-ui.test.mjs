@@ -628,4 +628,38 @@ test('会话归属：发送前把服务端 activeChatId 对齐到界面显示的
   assert.ok(src.includes('library.activeChatId])'), 'send deps must include activeChatId so the aligned callback is fresh')
 })
 
+// 成稿页原生适配：媒体视频语义 → 科研写作语义（保留双栏/Bento/hero/进度/chips 骨架）
+test('成稿页 studioView 已替换为科研写作语义，媒体视频语义清零', () => {
+  const start = src.indexOf("const studioView = h('div'")
+  assert.ok(start > 0, 'studioView must exist')
+  const cssAt = src.indexOf('const CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt > 0 ? cssAt : start + 6000)
+  for (const stale of ['分镜头脚本', '约 15 秒', '生成图片', '脚本骨架', '风格 · 默认', '一键成稿', '正在成稿']) {
+    assert.ok(!studio.includes(stale), 'studioView must not contain stale media/video copy: ' + stale)
+  }
+  for (const fresh of ['写作脉络', '让科灵写成初稿', '科灵写成初稿', '研究快报', '从提纲、证据链到引用核验']) {
+    assert.ok(studio.includes(fresh), 'studioView must contain research-writing copy: ' + fresh)
+  }
+  assert.ok(!src.includes('studioImages'), 'studioImages dead control and state must be gone')
+})
+
+test('成稿页体裁段是无障碍 radiogroup，主行动唯一且为 is-primary', () => {
+  const start = src.indexOf("const studioView = h('div'")
+  const cssAt = src.indexOf('const CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt > 0 ? cssAt : start + 6000)
+  assert.ok(studio.includes("className: 'md-seg', role: 'radiogroup', 'aria-label': '成稿体裁'"), 'md-seg must be an accessible radiogroup labeled 成稿体裁')
+  assert.equal((studio.match(/role: 'radio'/g) || []).length, 2, 'both genre buttons must be role=radio')
+  assert.equal((studio.match(/'aria-checked':/g) || []).length, 2, 'both genre buttons must expose aria-checked')
+  assert.equal((studio.match(/is-primary/g) || []).length, 1, 'studio must have exactly one primary action')
+  assert.ok(studio.includes("className: 'md-pill is-primary'"), 'primary action must reuse md-pill is-primary')
+  assert.ok(studio.includes("className: 'md-pill'"), 'verify action must be a secondary md-pill')
+})
+
+test('成稿页默认体裁为 article，后端 ask 调用链保持不变', () => {
+  assert.ok(src.includes("const [studioFormat, setStudioFormat] = useState('article')"), 'default genre must be article/短文')
+  assert.ok(src.includes("(studioFormat === 'article' ? '短文' : '研究快报')"), 'draftStudio ask prompt must keep 短文/研究快报 mapping verbatim')
+  assert.ok(src.includes("'基于这份草稿继续修改（'+t+'）：'+studioDraft"), 'refineStudio ask prompt must stay verbatim')
+  assert.ok(src.includes("'初稿 ' + studioDraft.length + ' 字'"), 'hero word count must come from real studioDraft.length')
+})
+
 
