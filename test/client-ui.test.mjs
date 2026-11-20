@@ -291,3 +291,24 @@ test('publish-lens drag persists via set_draft_status, not localStorage-only', (
   assert.ok(adapt && adapt.includes("status: x.status || contentStatus[x.id] || 'draft'"), 'ADAPT must prefer server draft status, localStorage only fallback')
   assert.ok(!(adapt && adapt.includes("status: 'draft', source: '写作'")), 'draft status must not be hardcoded')
 })
+
+test('schedule page has page head and a single 科灵 primary action; streak is real not hardcoded', () => {
+  const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+  // 排期页改为文字型 md-page，带页头 + hero + 唯一主行动（不再是裸 md-board-page）
+  const svAt = src.indexOf("const scheduleView = h('div', { className: 'md-page'")
+  assert.ok(svAt > 0, 'scheduleView must be a text-type md-page')
+  const sv = src.slice(svAt, svAt + 1800)
+  assert.ok(sv.includes("className: 'md-page-head'"), 'schedule page must have a page head')
+  assert.ok(sv.includes("'排期'"), 'schedule page head must title 排期')
+  assert.ok(sv.includes('md-i-hero') && sv.includes('nextHint'), 'schedule hero must show 科灵 next-step hint')
+  assert.equal((sv.match(/is-primary/g) || []).length, 1, 'schedule page must have exactly one primary action')
+  assert.ok(sv.includes('让科灵安排节奏'), 'primary action must be a 科灵 verb')
+  // 无 TDZ：scheduleView 必须定义在 nextHint 之后
+  const nhAt = src.indexOf('const nextHint =')
+  assert.ok(nhAt > 0 && svAt > nhAt, 'scheduleView must be defined after nextHint (no TDZ)')
+  // streak 两处 hero 写死 '0' 已改为真实 streak
+  const heroStreaks = src.split('\n').filter(l => l.includes("className: 'md-hero-streak'") && l.includes(' 天。'))
+  assert.equal(heroStreaks.length, 2, 'two hero 连续记录-天 badges exist')
+  assert.ok(heroStreaks.every(l => l.includes('String(streak)')), 'both streak-day badges show real streak, not hardcoded 0')
+  assert.ok(!heroStreaks.some(l => l.includes("}, '0')")), 'no streak-day badge hardcodes 0')
+})
