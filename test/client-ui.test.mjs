@@ -882,3 +882,33 @@ test('场景化配图新增片段零新增硬编码 hex', () => {
   assert.ok(regions.length > 200, 'found the added fragments')
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(regions), 'new UI code must not add hardcoded hex color')
 })
+
+// 批次3关3：跑验证链透明度与能力边界上屏（1.3 四条 + 1.2 双轨标注）
+test('four capability boundaries are on screen verbatim in plain language', () => {
+  for (const t of [
+    '三档权限开关只管科灵调用工具，管不到实验里跑的子程序',
+    '实验代码以解释器完整权限运行',
+    '只拦代理层的外网 HTTP(S) 请求，不等于机器断网',
+    '当前没有静态代码扫描，代码只查了长度和空值',
+    'runner.enabled 总开关和路径白名单约束',
+    '沙箱与确认闸门还在实现中',
+  ]) assert.ok(src.includes(t), 'missing boundary fact: ' + t)
+  assert.ok(!src.includes('扫描未命中不等于安全'), 'forbidden false-security sentence must not appear')
+})
+
+test('same capability boundary block is shown in both lab and void surfaces', () => {
+  assert.ok((src.match(/capabilityBoundary\(/g) || []).length >= 2, 'shared boundary helper must exist and be mounted in both surfaces')
+  assert.ok((src.match(/className: 'md-collab-boundary'/g) || []).length >= 1, 'reuse existing boundary class')
+  const at = src.indexOf("const labView = h('div'")
+  const end = src.indexOf('const collabView = h(', at)
+  const labSlice = src.slice(at, end)
+  assert.ok(labSlice.includes("capabilityBoundary('boundary')"), 'lab surface must carry the boundary block')
+  assert.ok(src.includes("capabilityBoundary('b')"), 'void surface must carry the same block')
+})
+
+test('two run tracks are labelled honestly in plain words', () => {
+  assert.ok(src.includes('这一轨是你自己主动执行：点一下就等于授权，只受 runner.enabled 总开关管，不经合作决策区拍板。'), 'direct lab track label missing')
+  assert.ok(src.includes('这一轨是科灵代替你执行：装包和工作区改动都要你在决策区拍板，跑完计入合作证据链。'), 'collab-led track label missing')
+  assert.ok(src.includes('onClick: runLab'), 'lab run button onClick unchanged')
+  assert.ok(src.includes("runCollabAction('collab_run', selectedCollab.id"), 'collab run button onClick unchanged')
+})
