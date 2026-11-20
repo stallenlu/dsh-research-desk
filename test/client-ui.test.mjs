@@ -404,4 +404,12 @@ test('chat sessions bar matches dock theme, has visible labels and distinguishab
   assert.ok(desk.includes('state.chats.forEach(autoTitleChat)'), 'migration must name legacy 新对话 sessions')
 })
 
+test('assistant talk language follows the all-Chinese UI; only explicit English switches', () => {
+  const eff = src.slice(src.indexOf('function effectiveLang('), src.indexOf('function isIdentityChat('))
+  assert.ok(eff.includes("if (localeId === 'en') return 'en'"), 'explicit English choice must still be honored')
+  assert.ok(eff.includes("return 'zh'"), 'default/host locale must render Chinese talk to match the all-Chinese UI')
+  assert.ok(!/navigator\.language/.test(eff) && !/documentElement\.lang/.test(eff), 'no browser-locale detection that flips suggestions to English')
+  assert.ok(src.includes("? ['梳理这个主题的综述'") && src.includes("? ['你能做什么'"), 'suggestion lists keep their Chinese branches')
+})
+
 
