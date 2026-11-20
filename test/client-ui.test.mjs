@@ -149,3 +149,40 @@ test('boundary copy is plain-language, home surfaces next step, decision point h
   assert.ok(src.includes("install: '安装依赖包（会联网）'"), 'risk:install: must map to plain-language label')
   assert.ok(src.includes('humanDecisionText(d.point)'), 'decision zone must render humanized point')
 })
+
+test('tool-call frames are forwarded by both host streams', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  const matches = host.match(/c && c\.type === 'tool-call-delta'/g) || []
+  assert.equal(matches.length, 2, 'both chat_stream and collab_stream onStream must detect tool-call-delta')
+  const writes = host.match(/text: '调用工具 ' \+ String\(c\.name/g) || []
+  assert.equal(writes.length, 2, "both streams must emit humanized tool text with kind:'tool'")
+  assert.ok(host.includes("'）', kind: 'tool' })") && host.includes("slice(0, 300)"), 'humanized tool text emitted with kind and truncated args')
+})
+
+test('tool frames are consumed by lab, collab and chat delta handlers', () => {
+  assert.ok(src.includes("ev.kind === 'tool' ? 'tool'"), 'lab console must tag tool frames with k=tool')
+  assert.ok((src.match(/t: ev\.text \|\| ''/g) || []).length >= 2, 'console lines must render server-authored humanized text')
+  // both console consumers contain ev.kind==='tool'
+  const kindChecks = src.match(/ev\.kind === 'tool'/g) || []
+  assert.ok(kindChecks.length >= 2, 'both lab and collab delta consumers must branch on ev.kind')
+  // chat accumulates to a separate toolTrace array
+  assert.ok(src.includes("let toolTrace = []"), 'chat must keep a separate toolTrace accumulator')
+  assert.ok(src.includes("ev.type === 'delta' && ev.kind === 'tool'"), 'chat delta handler must detect tool frames')
+  assert.ok(src.includes("toolTrace = toolTrace.concat([ev.text || ''])"), 'chat must push humanized tool text into toolTrace')
+  assert.ok(src.includes("toolTrace: toolTrace.slice()"), 'done must attach toolTrace to the ai message')
+  assert.ok(src.includes("className: 'md-tooltrace', key: 'tooltrace'"), 'chat must render a collapsible tooltrace details block')
+})
+
+test('tool trace CSS classes exist', () => {
+  assert.ok(src.includes('.md-lab-console .is-tool{color:#4176e6}'), 'console tool lines need a distinct style')
+  assert.ok(src.includes('.md-tooltrace>summary{cursor:pointer'), 'tooltrace summary must be a collapsible toggle')
+})
+
+test('void-space run button ships lab code to the collab_run executor', () => {
+  const line = src.split('\n').find(l => l.includes("'在虚空里跑实验'"))
+  assert.ok(line, 'run button not found')
+  assert.ok(line.includes('code: labDraft.code'), 'run button must pass labDraft.code to collab_run')
+  assert.ok(line.includes("runtime: labDraft.runtime || 'python'"), 'run button must pass runtime')
+  assert.ok(line.includes('先在实验台写一段验证代码，再点跑实验。'), 'empty-code guard toast missing')
+  assert.ok(!/\{ title: collabGoalText\(selectedCollab\) \}/.test(line), 'run button must not send only title')
+})
