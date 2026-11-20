@@ -50,7 +50,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 | `lib/qa.mjs` | 全文分块、BM25 检索、带引文核验的问答 | `chunkText`、`retrieve`、`ask` |
 | `lib/review.mjs` | 五个综述视角的检索与生成、逐条引文核验 | `PERSPECTIVES`、`generateReview`、`perspectiveKeys` |
 | `lib/runner.mjs` | 外部运行时探测、受限目录内跑代码、装包 | `runCode`、`installPackages`、`RUNTIMES`、`workDirFor` |
-| `lib/export.mjs` | Markdown / BibTeX / JSON 三种导出与去标识 | `toMarkdown`、`toBibTeX`、`toJSON`、`exportBundle` |
+| `lib/export.mjs` | Markdown / BibTeX / JSON / Typst / LaTeX 五种导出与去标识 | `citeKey`、`toMarkdown`、`toBibTeX`、`toJSON`、`toTypst`、`toLatex`、`exportBundle` |
 | `lib/desk.mjs` | 领域模型与唯一写路径：字段白名单、去重、操作集 | `applyOps`、`emptyState`、`migrateState`、`paperKey` |
 | `lib/store.mjs` | 原子落盘、mtime 重读、串行写队列、撤销栈 | `Store`、`dshHome`、`revertChange` |
 | `lib/settings.mjs` | 22 条设置定义、类型校验、密钥解析 | `SETTING_DEFS`、`coerceSettings`、`readSettings`、`resolveSecret` |
@@ -149,7 +149,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 | 新的设置项 | `lib/settings.mjs` 的 `SETTING_DEFS` 加一条（`key` / `label` / `type` / `default` / 可选 `min`·`max`·`options`·`help`）。面板、校验、默认值合并、导出脱敏会自动跟上 |
 | 新的检索数据源 | `lib/search.mjs` 的 `SOURCES` 与对应查询函数；再把 `settings.mjs` 里 `sources` 的 `options` 同步上 |
 | 新的综述视角 | `lib/review.mjs` 的 `PERSPECTIVES`（`label` + `query` + `instruction`）；再把 `review.perspectives` 的 `options` 同步上 |
-| 新的导出格式 | `lib/export.mjs` 增加转换函数并在 `exportBundle()` 里加文件条目；再把 `host.mjs` 的 `formats` 枚举同步上 |
+| 新的导出格式 | `lib/export.mjs` 增加转换函数并在 `exportBundle()` 里加文件条目；再把 `host.mjs` 的 `formats` 枚举（现为 `md`/`bib`/`json`/`typst`/`latex`，见 `exportData()` 的 `lib/host.mjs:1304`）同步上 |
 | 换存储位置 | `lib/store.mjs` 的 `Store(root, createState)` 构造参数；`host.mjs` 用 `new Store(undefined, migrateState)`，`lib/mcp.mjs` 用 `createMcpServer({ dataDir })` |
 | 换模型路由 | `lib/llm.mjs` 的 `defaultRoute()` / `streamText()`；设置项 `model.route` 会在 `host.mjs` 的 `routeFor()` 里解析成 `provider/model` |
 
