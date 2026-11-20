@@ -369,8 +369,27 @@ test('chat reasoning/toolTrace/usageText persist across library rebuild', () => 
   assert.ok(host.includes("reasoningAcc += c.text") && host.includes('toolTrace.push(toolText)'), 'server must accumulate reasoning and tool trace')
   // desk.mjs 迁移对旧记录补空字段，不破坏历史 chat
   const desk = readFileSync(new URL('../lib/desk.mjs', import.meta.url), 'utf8')
-  assert.ok(desk.includes("if (typeof row.reasoning !== 'string') row.reasoning = ''"), 'migrate must backfill reasoning on old chat rows')
-  assert.ok(desk.includes("if (!Array.isArray(row.toolTrace)) row.toolTrace = []"), 'migrate must backfill toolTrace on old chat rows')
-  assert.ok(desk.includes("if (typeof row.usageText !== 'string') row.usageText = ''"), 'migrate must backfill usageText on old chat rows')
+  assert.ok(desk.includes("out.reasoning = ''"), 'migrate must backfill reasoning on old chat rows')
+  assert.ok(desk.includes("out.toolTrace = out.toolTrace ?"), 'migrate must backfill toolTrace on old chat rows')
+  assert.ok(desk.includes("out.usageText = ''"), 'migrate must backfill usageText on old chat rows')
 })
+test('chat sessions: server actions, mirror sync, and dock session bar are wired', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  const desk = readFileSync(new URL('../lib/desk.mjs', import.meta.url), 'utf8')
+  for (const a of ['chat_list', 'chat_new', 'chat_switch', 'chat_rename', 'chat_delete']) {
+    assert.ok(host.includes("'" + a + "'"), 'host ACTIONS must contain ' + a)
+    assert.ok(host.includes("action: '" + a + "'"), 'host must return human message for ' + a)
+  }
+  assert.ok(desk.includes('chats: []'), 'emptyState must include chats array')
+  assert.ok(desk.includes("activeChatId: ''"), 'emptyState must include activeChatId')
+  assert.ok(desk.includes('export function syncActiveChat'), 'desk must export syncActiveChat')
+  const syncCount = (host.match(/syncActiveChat\(draft\)/g) || []).length
+  assert.ok(syncCount >= 9, 'all chat write points must call syncActiveChat(draft), got ' + syncCount)
+  assert.ok(src.includes("action: 'chat_new'") && src.includes("action: 'chat_switch'"), 'client must call chat_new/chat_switch')
+  assert.ok(src.includes("action: 'chat_rename'") && src.includes("action: 'chat_delete'"), 'client must call chat_rename/chat_delete')
+  assert.ok(src.includes("className: 'md-chatbar'"), 'dock must render chat session bar')
+  assert.ok(src.includes('chatMenuOpen') && src.includes('renameChatId'), 'dock must have session menu + rename state')
+  assert.ok(src.includes('(library.chats || [])'), 'session bar must read chats from library (server), not local state')
+})
+
 
