@@ -608,4 +608,11 @@ test('搜索范围：默认搜全部会话，可勾选多个会话限定搜索�
   assert.ok(src.includes('!selectedSearchChats && results.length === 1'), 'auto-jump only when scope is 全部, so scoped searches show the list first')
 })
 
+test('会话归属：发送前把服务端 activeChatId 对齐到界面显示的会话，避免回答落进旧会话', () => {
+  assert.ok(src.includes("action: 'chat_switch', id: targetChatId"), 'send must re-assert server active chat to the chat shown in UI')
+  assert.ok(src.includes('const targetChatId = library && library.activeChatId'), 'target must be the UI-shown active chat')
+  assert.ok(src.includes("await call({ action: 'chat_switch', id: targetChatId })"), 'align must await before chat_stream sends (avoid race)')
+  assert.ok(src.includes('library.activeChatId])'), 'send deps must include activeChatId so the aligned callback is fresh')
+})
+
 
