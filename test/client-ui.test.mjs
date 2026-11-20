@@ -596,6 +596,7 @@ test('search-hit: 围栏内词也定位、单选自动跳、多条上一处/下�
   assert.ok(src.includes("className: 'md-hitnav'") && src.includes('上一处') && src.includes('下一处'), 'multi-hit nav UI with prev/next')
   assert.ok(src.includes("'命中 ' + hitNav.total + ' 处 · 第 ' + (hitNav.index + 1) + ' 处'"), 'nav label shows hit count and current index')
   assert.ok(src.includes('.md-msg.is-hit{') && src.includes('rd-hit-pulse'), 'highlight CSS uses semantic accent with pulse')
+  assert.ok(/\.md-hitnav\{[^}]*position:sticky/.test(src), 'hit-nav bar is sticky so prev/next stays visible while scrolling hits')
 })
 
 
