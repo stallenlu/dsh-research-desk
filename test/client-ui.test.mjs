@@ -793,6 +793,7 @@ test('批次2 +号命令目录：渲染 status.commands，只读 action 直接 c
   assert.ok(js.includes("F({ key: 'cmdcatalog', icon: 'plus', size: 13, className: 'md-ctool', label: '命令目录', onClick: openCommandMenu })"), 'composer + button must be distinct from top new-chat plus')
   assert.ok(js.includes("cmdCatalog.filter(function (c) { return c && c.action }).map(function (c, ci)"), 'every listed item must map to a real action')
   assert.ok(js.includes("className: 'md-chatmenu md-cmdmenu'") && js.includes('cmdMenuOpen ? h('), 'overlay must reuse md-chatmenu visual syntax')
+  assert.ok(js.includes("style: { left: '0', right: 'auto', width: '272px', top: 'auto', bottom: 'calc(100% + 4px)', maxHeight: 'min(320px, calc(100vh - 120px))' }"), 'cmdmenu must flip upward (top:auto + bottom:calc(100% + 4px)) overriding base top:100%, and clamp maxHeight with calc(100vh')
   assert.ok(js.includes('if (READONLY_CMDS.indexOf(act) >= 0) {'), 'write actions must never be called directly')
   assert.ok(js.includes('【需参数】') && js.includes('不会直接执行，请补全后自行发送'), 'write/param actions must only fill a marked hint into composer')
   const toolsAt = js.indexOf("h('div', { className: 'md-composer-tools'")
@@ -800,7 +801,7 @@ test('批次2 +号命令目录：渲染 status.commands，只读 action 直接 c
   const visionAt = block.indexOf("key: 'vision'")
   const permAt = block.indexOf("key: 'permind'")
   const plusAt = block.indexOf("key: 'cmdcatalog'")
-  assert.ok(visionAt >= 0 && permAt > visionAt && plusAt > permAt, 'tool row order must be 插件功能｜权限设置｜+号')
+  assert.ok(plusAt >= 0 && permAt > plusAt && visionAt > permAt, 'tool row order must be +号｜权限设置｜插件功能 (DSH native left group)')
 })
 
 test('批次2 输出侧靠左回归：注释锁定附件条靠左，不改 align-items:stretch，不新增输出侧回显', () => {
