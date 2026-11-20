@@ -430,9 +430,9 @@ test('L3 会话卡只渲染服务端算好的 summary/tags/outcomes，缺省优�
 test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会话', () => {
   assert.ok(src.includes("icon: 'search', label: '找历史对话'"), 'chatbar must expose a 找历史 entry as F icon button + tooltip')
   assert.ok(src.includes("action: 'chat_search'"), 'search must call chat_search action')
-  assert.ok(src.includes('setChatSearchResults(Array.isArray(d && d.results) ? d.results : [])'), 'client must render server results verbatim')
+  assert.ok(src.includes('setChatSearchResults(results)'), 'client must render server results verbatim')
   assert.ok(src.includes('chatSearchResults.length'), 'search results list must be rendered')
-  assert.ok(src.includes('await chatSwitchOp(r.id)'), 'clicking a result must reuse chatSwitchOp (await switch before locating hit)')
+  assert.ok(src.includes('onClick: () => openSearchHit(r)'), 'clicking a result must reuse openSearchHit (switch then locate)')
 })
 
 test('L3 会话卡与搜索样式仍走语义 token，无浅色兜底 HEX', () => {
@@ -582,14 +582,20 @@ test('三处装饰开关诚实化：识图/协作标注未接入，权限标当�
   assert.ok(src.includes('高风险动作（装包、发包等）仍需在决策区拍板'), 'perm copy must scope high-risk to decision zone')
 })
 
-test('search-hit locates the matched message and highlights it', () => {
+test('search-hit: 围栏内词也定位、单选自动跳、多条上一处/下一处导航', () => {
   assert.ok(src.includes("const [searchHitTerm, setSearchHitTerm] = useState('')"), 'search-hit state present')
+  assert.ok(src.includes('const [hitNav, setHitNav] = useState({ index: 0, total: 0 })'), 'multi-hit nav state present')
   assert.ok(src.includes('ref: dockRef'), 'dock ref attached to scroll container')
-  assert.ok(src.includes('await chatSwitchOp(r.id); setSearchHitTerm'), 'waits for chat switch before setting hit term (no stale-msgs race)')
-  assert.ok(src.includes("root.querySelector('.md-msg.is-hit')"), 'effect locates the highlighted message')
+  assert.ok(src.includes('const openSearchHit = useCallback(async (r, termOverride) =>'), 'unified open-hit callback present')
+  assert.ok(src.includes('await chatSwitchOp(r.id)') && src.includes('setSearchHitTerm(term)'), 'waits for chat switch before setting hit term (no stale-msgs race)')
+  assert.ok(src.includes('results.length === 1 && results[0] && results[0].id) openSearchHit(results[0], query)'), 'single hit auto-jumps to the matched session')
+  assert.ok(src.includes("'data-hit': (searchHitTerm && String(m.text || '').indexOf(searchHitTerm) !== -1 ? '1' : '')"), 'data-hit uses raw message text so fenced-block terms match too')
+  assert.ok(src.includes('querySelectorAll(') && src.includes('[data-hit='), 'effect queries all raw-text hits')
+  assert.ok(src.includes('const idx = Math.min(hitNav.index, hits.length - 1)') && src.includes("target.classList.add('is-hit')"), 'effect highlights the indexed hit and scrolls to it')
   assert.ok(src.includes('target.scrollIntoView'), 'effect scrolls the hit into view')
-  assert.ok(src.includes('setSearchHitTerm(\'\') }, 5000)'), 'highlight auto-clears after 5s')
-  assert.ok(src.includes('.md-msg.is-hit{'), 'highlight CSS exists with semantic accent')
+  assert.ok(src.includes("className: 'md-hitnav'") && src.includes('上一处') && src.includes('下一处'), 'multi-hit nav UI with prev/next')
+  assert.ok(src.includes("'命中 ' + hitNav.total + ' 处 · 第 ' + (hitNav.index + 1) + ' 处'"), 'nav label shows hit count and current index')
+  assert.ok(src.includes('.md-msg.is-hit{') && src.includes('rd-hit-pulse'), 'highlight CSS uses semantic accent with pulse')
 })
 
 
