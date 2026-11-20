@@ -431,7 +431,7 @@ test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会
   assert.ok(src.includes("icon: 'search', label: '找历史对话'"), 'chatbar must expose a 找历史 entry as F icon button + tooltip')
   assert.ok(src.includes("action: 'chat_search'"), 'search must call chat_search action')
   assert.ok(src.includes('setChatSearchResults(results)'), 'client must render server results verbatim')
-  assert.ok(src.includes('chatSearchResults.length'), 'search results list must be rendered')
+  assert.ok(src.includes('visibleChatSearchResults.length'), 'search results list must be rendered (scope-filtered)')
   assert.ok(src.includes('onClick: () => openSearchHit(r)'), 'clicking a result must reuse openSearchHit (switch then locate)')
 })
 
@@ -597,6 +597,15 @@ test('search-hit: 围栏内词也定位、单选自动跳、多条上一处/下�
   assert.ok(src.includes("'命中 ' + hitNav.total + ' 处 · 第 ' + (hitNav.index + 1) + ' 处'"), 'nav label shows hit count and current index')
   assert.ok(src.includes('.md-msg.is-hit{') && src.includes('rd-hit-pulse'), 'highlight CSS uses semantic accent with pulse')
   assert.ok(/\.md-hitnav\{[^}]*position:sticky/.test(src), 'hit-nav bar is sticky so prev/next stays visible while scrolling hits')
+})
+
+test('搜索范围：默认搜全部会话，可勾选多个会话限定搜索结果', () => {
+  assert.ok(src.includes('selectedSearchChats'), 'must track selected search-scope chat ids')
+  assert.ok(src.includes('setSelectedSearchChats(null)') && src.includes("'全部'"), 'must offer an 全部 (all chats) option')
+  assert.ok(src.includes('visibleChatSearchResults'), 'results must be filtered by selected scope before rendering')
+  assert.ok(src.includes('selectedSearchChats.has(String(x && x.id))'), 'filter must match result chat ids against selection')
+  assert.ok(src.includes('toggleSearchChat(c.id)') && src.includes('md-chatsearch-chip'), 'each chat must be a toggleable scope chip')
+  assert.ok(src.includes('!selectedSearchChats && results.length === 1'), 'auto-jump only when scope is 全部, so scoped searches show the list first')
 })
 
 
