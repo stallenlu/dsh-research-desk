@@ -392,4 +392,16 @@ test('chat sessions: server actions, mirror sync, and dock session bar are wired
   assert.ok(src.includes('(library.chats || [])'), 'session bar must read chats from library (server), not local state')
 })
 
+test('chat sessions bar matches dock theme, has visible labels and distinguishable titles', () => {
+  const bar = src.slice(src.indexOf('const CHATBAR_CSS = ['), src.indexOf('function injectStyles'))
+  assert.ok(bar.includes('var(--card)') && bar.includes('var(--ink)'), 'chatbar must use .md-root theme tokens (--card/--ink)')
+  assert.ok(!/#(fff|f1f5f9|e2e8f0|cbd5e1|e4eaf2)/i.test(bar), 'chatbar must not hardcode light color fallbacks')
+  assert.ok(!bar.includes('--dsw-alias-'), 'chatbar must not bypass dock theme via --dsw-alias variables')
+  assert.ok(src.includes("onClick: chatNewOp }, [I({ name: 'plus', size: 14 }), '新建'])"), 'new-session button must show a visible 新建 label')
+  const desk = readFileSync(new URL('../lib/desk.mjs', import.meta.url), 'utf8')
+  assert.ok(desk.includes('function autoTitleChat(row)'), 'server must auto-name sessions from first question')
+  assert.ok(desk.includes('  autoTitleChat(row)\n'), 'syncActiveChat must apply auto-title on message write')
+  assert.ok(desk.includes('state.chats.forEach(autoTitleChat)'), 'migration must name legacy 新对话 sessions')
+})
+
 
