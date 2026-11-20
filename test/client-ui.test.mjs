@@ -249,3 +249,10 @@ test('per-answer copy button reuses clipboard with execCommand fallback, no is-p
   assert.ok(src.includes('function F(props)'), 'existing F helper must be reused')
   assert.ok(src.includes("copy:'M9 9h10v11H9zM5 15V4h10'"), 'existing copy icon must be reused')
 })
+test("dock collapse button aligns to top-right of title", () => {
+  assert.ok(src.includes(".md-root .md-dock-head h2 + .md-icon-btn { margin-left: auto; }"), "dock close button must be pushed to right edge")
+  assert.ok(src.includes(".md-dock-head { flex: none; display: flex; align-items: center;"), "dock head must be flex row with vertical centering")
+  const dhAt = src.indexOf("'data-window-drag': '', key: 'dh'")
+  const region = src.slice(dhAt, dhAt + 400)
+  assert.ok(region.indexOf("'科灵'") < region.indexOf("label: '收起对话'"), "title before close button")
+})
