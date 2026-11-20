@@ -432,7 +432,7 @@ test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会
   assert.ok(src.includes("action: 'chat_search'"), 'search must call chat_search action')
   assert.ok(src.includes('setChatSearchResults(Array.isArray(d && d.results) ? d.results : [])'), 'client must render server results verbatim')
   assert.ok(src.includes('chatSearchResults.length'), 'search results list must be rendered')
-  assert.ok(src.includes('setChatSearchOpen(false); chatSwitchOp(r.id)'), 'clicking a result must reuse chatSwitchOp')
+  assert.ok(src.includes('await chatSwitchOp(r.id)'), 'clicking a result must reuse chatSwitchOp (await switch before locating hit)')
 })
 
 test('L3 会话卡与搜索样式仍走语义 token，无浅色兜底 HEX', () => {
@@ -580,6 +580,16 @@ test('三处装饰开关诚实化：识图/协作标注未接入，权限标当�
   assert.ok(src.includes("' · 当前只读'"), 'perm row must show it currently runs read-only')
   assert.ok(src.includes('不会立刻提权'), 'perm tip must say selecting a higher tier does not escalate')
   assert.ok(src.includes('高风险动作（装包、发包等）仍需在决策区拍板'), 'perm copy must scope high-risk to decision zone')
+})
+
+test('search-hit locates the matched message and highlights it', () => {
+  assert.ok(src.includes("const [searchHitTerm, setSearchHitTerm] = useState('')"), 'search-hit state present')
+  assert.ok(src.includes('ref: dockRef'), 'dock ref attached to scroll container')
+  assert.ok(src.includes('await chatSwitchOp(r.id); setSearchHitTerm'), 'waits for chat switch before setting hit term (no stale-msgs race)')
+  assert.ok(src.includes("root.querySelector('.md-msg.is-hit')"), 'effect locates the highlighted message')
+  assert.ok(src.includes('target.scrollIntoView'), 'effect scrolls the hit into view')
+  assert.ok(src.includes('setSearchHitTerm(\'\') }, 5000)'), 'highlight auto-clears after 5s')
+  assert.ok(src.includes('.md-msg.is-hit{'), 'highlight CSS exists with semantic accent')
 })
 
 
