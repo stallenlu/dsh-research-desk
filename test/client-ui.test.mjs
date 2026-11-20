@@ -404,11 +404,15 @@ test('chat sessions bar matches dock theme, has visible labels and distinguishab
   assert.ok(desk.includes('state.chats.forEach(autoTitleChat)'), 'migration must name legacy 新对话 sessions')
 })
 
-test('assistant talk language follows the all-Chinese UI; only explicit English switches', () => {
+test('assistant talk language: explicit choice wins; host档 truly follows DSH locale bridge', () => {
   const eff = src.slice(src.indexOf('function effectiveLang('), src.indexOf('function isIdentityChat('))
   assert.ok(eff.includes("if (localeId === 'en') return 'en'"), 'explicit English choice must still be honored')
-  assert.ok(eff.includes("return 'zh'"), 'default/host locale must render Chinese talk to match the all-Chinese UI')
-  assert.ok(!/navigator\.language/.test(eff) && !/documentElement\.lang/.test(eff), 'no browser-locale detection that flips suggestions to English')
+  assert.ok(eff.includes("if (localeId === 'zh') return 'zh'"), 'explicit Chinese choice must be honored')
+  assert.ok(eff.includes("return hostLang === 'en' ? 'en' : 'zh'"), 'host档 must follow the DSH host language, with a safe Chinese fallback')
+  assert.ok(!/navigator\.language/.test(eff) && !/documentElement\.lang/.test(eff), 'no static html lang / browser-locale detection that misreads lang=en')
+  assert.ok(src.includes('globalThis.__DSH_LOCALE__') && src.includes('.read()'), 'a bridge effect must read the authoritative DSH locale signal')
+  assert.ok(src.includes("bridge.onChange"), 'bridge effect must subscribe to later DSH language switches')
+  assert.ok(src.includes("effectiveLang(localeId, hostLang)"), 'both send and suggestion call sites must pass hostLang')
   assert.ok(src.includes("? ['梳理这个主题的综述'") && src.includes("? ['你能做什么'"), 'suggestion lists keep their Chinese branches')
 })
 
