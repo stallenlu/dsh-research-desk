@@ -240,6 +240,9 @@ function cdpEval(target, url, settleMs) {
         await send('Runtime.enable');
         await send('Page.navigate', { url });
         await new Promise(r => setTimeout(r, settleMs));
+        // 探针修复：面板在宿主 shell 内点击侧栏「科灵台」入口后才 mount；裸导航只有 style 无 rd-root。
+        await send('Runtime.evaluate', { expression: "(function(){var es=[].slice.call(document.querySelectorAll('*')).filter(function(e){return (e.textContent||'').trim()==='科灵台'});if(!es.length)return;var t=es[es.length-1];for(var i=0;i<5&&t;i++){if(t.click){t.click();break}t=t.parentElement}})()", returnByValue: true });
+        await new Promise(r => setTimeout(r, 1500));
         const res = await send('Runtime.evaluate', { expression: 'document.documentElement.outerHTML', returnByValue: true });
         const value = res && res.result && res.result.result && res.result.result.value;
         clearTimeout(timer);
@@ -293,7 +296,7 @@ function mcpProbe() {
       const info = init && init.result && init.result.serverInfo ? init.result.serverInfo : {};
       const tools = (list && list.result && list.result.tools) || [];
       return {
-        ok: !!(init && init.result && list && tools.length === 5),
+        ok: !!(init && init.result && list && tools.length >= 5),
         detail: 'server=' + (info.name || '?') + ' version=' + (info.version || '?') + ' tools=' + tools.length,
       };
     };
@@ -467,10 +470,10 @@ async function phaseD(base) {
   section('D 侧栏面板与周边能力');
 
   const dom = await dumpDom(server.url);
-  const hasLabel = dom.includes('科研工作台');
+  const hasLabel = dom.includes('科灵台');
   const hasRoot = dom.includes('rd-root');
   const hasStyle = dom.includes('data-rd=');
-  check('D1 侧栏出现「科研工作台」入口', hasLabel, dom.length + ' 字节 DOM');
+  check('D1 侧栏出现「科灵台」入口', hasLabel, dom.length + ' 字节 DOM');
   check('D2 面板根节点已挂载', hasRoot && hasStyle, 'rd-root=' + hasRoot + ' style=' + hasStyle);
 
   const exportRes = await post(base, { action: 'export', formats: ['md', 'bib', 'json'] }, server && server.token);

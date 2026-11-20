@@ -61,7 +61,8 @@ test('set_hypothesis_status action is fully wired in host', () => {
 
 test('lab total entry preserved and collab view dispatched', () => {
   assert.ok(src.includes("['lab', '虚空']"))
-  assert.ok(src.includes("view === 'collab' ? collabView"))
+  assert.ok(src.includes("view === 'lab' ? collabView"))
+  assert.ok(!src.includes("view === 'collab' ? collabView"), 'no duplicate collab dispatch')
   assert.ok(src.includes("'在虚空里验证'"))
 })
 
@@ -311,4 +312,24 @@ test('schedule page has page head and a single 科灵 primary action; streak is 
   assert.equal(heroStreaks.length, 2, 'two hero 连续记录-天 badges exist')
   assert.ok(heroStreaks.every(l => l.includes('String(streak)')), 'both streak-day badges show real streak, not hardcoded 0')
   assert.ok(!heroStreaks.some(l => l.includes("}, '0')")), 'no streak-day badge hardcodes 0')
+})
+
+test('custom style actually applies and note capture stores text', () => {
+  const styleLine = src.split('\n').find(l => l.includes('ALL_STYLES.concat(customStyles).find'))
+  assert.ok(styleLine, 'send() must resolve custom styles, not only presets')
+  const depsLine = src.split('\n').find(l => l.includes('[busy, fullCount, applyLibrary, activeStyle, customStyles,'))
+  assert.ok(depsLine, 'send() deps must include customStyles so newly added styles take effect')
+  const noteLine = src.split('\n').find(l => l.includes("value: captureText, onChange: e => setCaptureText(e.target.value)"))
+  assert.ok(noteLine, 'note textarea must bind captureText state')
+  assert.ok(!noteLine.includes('papers[0]'), 'note textarea must not fake-prefill with a paper title')
+})
+
+test('collab has a single tab mapping and dead view code is gone', () => {
+  assert.ok(!src.includes("setView('collab')"), 'no跳转到不存在的 collab Tab')
+  assert.ok(!src.includes("view === 'collab' ? collabView"), 'no duplicate collab dispatch branch')
+  assert.ok(src.includes("view === 'lab' ? collabView : styleView"), 'single lab→collabView dispatch remains')
+  for (const name of ['feed', 'notesView', 'planView', 'contentView']) {
+    assert.ok(!src.includes('const ' + name + ' ='), 'dead code ' + name + ' should be removed')
+  }
+  assert.ok(src.includes("['lab', '虚空']"), '虚空 lab tab retained')
 })
