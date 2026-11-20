@@ -155,9 +155,11 @@ test('tool-call frames are forwarded by both host streams', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
   const matches = host.match(/c && c\.type === 'tool-call-delta'/g) || []
   assert.equal(matches.length, 2, 'both chat_stream and collab_stream onStream must detect tool-call-delta')
-  const writes = host.match(/text: '调用工具 ' \+ String\(c\.name/g) || []
+  // chatStream 用 toolText 变量渲染工具帧（还要累积 toolTrace），collabStream 仍内联；两种写法都算
+  const writes = host.match(/(?:const toolText = |text: )'调用工具 ' \+ String\(c\.name/g) || []
   assert.equal(writes.length, 2, "both streams must emit humanized tool text with kind:'tool'")
-  assert.ok(host.includes("'）', kind: 'tool' })") && host.includes("slice(0, 300)"), 'humanized tool text emitted with kind and truncated args')
+  assert.ok(host.includes("toolTrace.push(toolText)"), 'chatStream must accumulate tool trace for persistence')
+  assert.ok(host.includes("slice(0, 300)"), 'humanized tool text must truncate args')
 })
 
 test('tool frames are consumed by lab, collab and chat delta handlers', () => {
@@ -350,5 +352,25 @@ test('schedule hero has bottom spacing before calendar area', () => {
   const svAt = src.indexOf("const scheduleView = h('div', { className: 'md-page'")
   const heroLine = src.slice(svAt, svAt + 400).split('\n').find(l => l.includes("key: 'hero'"))
   assert.ok(heroLine && heroLine.includes('marginBottom: 24'), 'schedule hero must have bottom margin so it does not touch calendar area')
+})
+
+test('chat reasoning/toolTrace/usageText persist across library rebuild', () => {
+  // 客户端重建必须携带服务端持久化的三字段（刷新后恢复的来源）
+  const aiLine = src.split('\n').find(l => l.includes("rebuilt.push({ role: 'ai', text: String(row.a)"))
+  assert.ok(aiLine, 'applyLibrary must rebuild ai message from chat row')
+  for (const field of ['row.reasoning', 'row.toolTrace', 'row.usageText', 'row.at']) {
+    assert.ok(aiLine.includes(field), 'applyLibrary ai row must carry ' + field)
+  }
+  assert.ok(aiLine.includes('Array.isArray(row.toolTrace)'), 'toolTrace must be guarded as array')
+  // 服务端必须把三字段落库
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  const persistLine = host.split('\n').find(l => l.includes("verified: 0, reasoning: reasoningAcc, toolTrace: toolTrace.slice(), usageText"))
+  assert.ok(persistLine, 'chat_stream must persist reasoning/toolTrace/usageText into chat row')
+  assert.ok(host.includes("reasoningAcc += c.text") && host.includes('toolTrace.push(toolText)'), 'server must accumulate reasoning and tool trace')
+  // desk.mjs 迁移对旧记录补空字段，不破坏历史 chat
+  const desk = readFileSync(new URL('../lib/desk.mjs', import.meta.url), 'utf8')
+  assert.ok(desk.includes("if (typeof row.reasoning !== 'string') row.reasoning = ''"), 'migrate must backfill reasoning on old chat rows')
+  assert.ok(desk.includes("if (!Array.isArray(row.toolTrace)) row.toolTrace = []"), 'migrate must backfill toolTrace on old chat rows')
+  assert.ok(desk.includes("if (typeof row.usageText !== 'string') row.usageText = ''"), 'migrate must backfill usageText on old chat rows')
 })
 
