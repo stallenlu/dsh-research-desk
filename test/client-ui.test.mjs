@@ -562,5 +562,15 @@ test('顶栏自检按钮：探活后端后就地重载，不重启主进程', ()
   assert.ok(src.includes("key: 'selfreload', icon: 'bolt'"), 'self-reload must use bolt icon to avoid duplicate icons')
   assert.ok(src.includes('自检并就地重载'), 'self-reload button must carry a plain-language tooltip')
 })
+test('后端路由竞态：404 自动重试一次并把失败真相留痕，不只弹裸 HTTP 404', () => {
+  assert.ok(src.includes('async function call(payload, attempt)'), 'call must accept attempt counter for retry')
+  assert.ok(src.includes('res.status === 404 && tries === 0'), 'first 404 recognized as cold-start race')
+  assert.ok(src.includes('setTimeout(r, 700)'), 'retry must wait 700ms like the official steward plugin')
+  assert.ok(src.includes('return call(payload, tries + 1)'), 'retry must recurse with incremented attempt')
+  assert.ok(src.includes('recordHostDiag'), 'requests must leave a diagnostic trail')
+  assert.ok(src.includes('rd.hostDiag'), 'diagnostics persist to localStorage for self-check')
+  assert.ok(src.includes('后端路由没挂上'), 'persistent 404 must show a plain-language cause')
+  assert.ok(src.includes('baseURI'), 'diagnostic must capture the real page base')
+})
 
 
