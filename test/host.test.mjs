@@ -36,6 +36,9 @@ globalThis.fetch = async input => {
 
 let modelText = ''
 const modelCalls = []
+// 视觉能力检查：默认按模型名判定——名字含 vl 的算视觉模型，其余只有文本。
+// 单个用例可临时改写它来覆盖「resolveModelInfo 抛错/不返回 inputModalities」分支。
+let resolveModelInfoImpl = async (provider, model) => ({ inputModalities: (model && String(model).includes('vl')) ? ['text', 'image'] : ['text'] })
 
 const llm = {
   prepareCall: async (config, signal) => ({
@@ -52,6 +55,7 @@ const llm = {
   }),
   listProviders: () => [{ id: 'fake' }],
   listModels: providerId => [{ id: 'fake/model' }],
+  resolveModelInfo: async (provider, model) => resolveModelInfoImpl(provider, model),
 }
 
 const ctx = {
@@ -772,6 +776,8 @@ test('全局 kelin.role 声明存在；本次合作角色经边界消息注入�
     followup: m => followups.push(m),
     whenIdle: async () => {},
     session: { deriveMessages: () => [] },
+    // 无图片用例不应触发视觉检查；仍给出真实 API 形状以贴近线上 agent。
+    model: { current: () => ({ provider: 'fake', model: 'fake/model' }) },
   }
   const chatCtx = {
     get: name => name === 'agents' ? { create: async opts => { createMeta.push(opts && opts.meta); if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } } : ctx.get(name),
@@ -794,4 +800,92 @@ test('全局 kelin.role 声明存在；本次合作角色经边界消息注入�
   assert.equal(followups.length, 1)
   assert.deepEqual(followups[0].content, [{ type: 'text', text: '你好' }])
   assert.ok(events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision' && e[1].imageCount === 0 && e[1].admitted === 0))
+})
+
+// ── 识图：送图前对齐官方链路的模型能力检查 ────────────────────────────────────
+const VISION_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
+
+/**
+ * 造一个带图片能力的 chatStream 上下文；current 是 agent.model.current() 的返回值。
+ * 返回 followups/events/admittedCalls 供断言，不联网、不调真模型。
+ */
+function visionChat(current) {
+  const injected = []
+  const followups = []
+  const events = []
+  const admittedCalls = []
+  const agent = {
+    inject: b => injected.push(b),
+    followup: m => followups.push(m),
+    whenIdle: async () => {},
+    session: { deriveMessages: () => [] },
+    model: { current: () => current },
+  }
+  const chatCtx = {
+    get: name => (name === 'agents'
+      ? { create: async () => ({ agent, dispose: () => {} }) }
+      : name === 'attachments'
+        ? { admitPromptContent: async parts => { admittedCalls.push(parts); return parts.map((p, i) => ({ type: 'image', url: 'attachment://img' + i })) } }
+        : ctx.get(name)),
+    on: () => () => {},
+    permissionPresets: { set: async () => {} },
+  }
+  process.env.DSH_HOME = join(tempHome, 'case-vision-' + caseIndex++)
+  const svc = createService(chatCtx)
+  const stream = { write: (t, d) => events.push([t, d]), close: () => {} }
+  return { svc, stream, events, followups, admittedCalls, injected }
+}
+
+test('识图：非视觉模型拦截——报错 + diag，图片不提纯、不并入 followup，文字照常', async () => {
+  const prev = resolveModelInfoImpl
+  resolveModelInfoImpl = async (provider, model) => ({ inputModalities: ['text'] })
+  try {
+    const t = visionChat({ provider: 'fake', model: 'fake/model' })
+    await t.svc.chatStream({ question: '看这张图', diag: true, perm: 'read-only', images: [{ mediaType: 'image/png', data: VISION_PNG }] }, t.stream)
+    const err = t.events.find(e => e[0] === 'error' && /不支持看图/.test(String(e[1] && e[1].message)))
+    assert.ok(err, '应产生「不支持看图」的 error 帧')
+    assert.match(err[1].message, /图片未被发送/)
+    assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision-model-unsupported' && e[1].provider === 'fake' && e[1].model === 'fake/model'), '应产生 vision-model-unsupported diag')
+    assert.equal(t.admittedCalls.length, 0, '非视觉模型不得提纯图片')
+    assert.equal(t.followups.length, 1)
+    assert.deepEqual(t.followups[0].content, [{ type: 'text', text: '看这张图' }], 'followup 只有文字块，图片未发送')
+    assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision' && e[1].imageCount === 1 && e[1].admitted === 0))
+  } finally {
+    resolveModelInfoImpl = prev
+  }
+})
+
+test('识图：视觉模型放行——不报错，走提纯且图片块并入 followup', async () => {
+  const prev = resolveModelInfoImpl
+  resolveModelInfoImpl = async (provider, model) => ({ inputModalities: ['text', 'image'] })
+  try {
+    const t = visionChat({ provider: 'fake', model: 'fake/vl' })
+    await t.svc.chatStream({ question: '看这张图', diag: true, perm: 'read-only', images: [{ mediaType: 'image/png', data: VISION_PNG }] }, t.stream)
+    assert.ok(!t.events.some(e => e[0] === 'error' && /不支持看图/.test(String(e[1] && e[1].message))), '视觉模型不得报错')
+    assert.ok(!t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision-model-unsupported'))
+    assert.equal(t.admittedCalls.length, 1, '视觉模型应提纯图片')
+    assert.equal(t.followups.length, 1)
+    assert.equal(t.followups[0].content.length, 2)
+    assert.deepEqual(t.followups[0].content[0], { type: 'image', url: 'attachment://img0' })
+    assert.deepEqual(t.followups[0].content[1], { type: 'text', text: '看这张图' })
+    assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision' && e[1].imageCount === 1 && e[1].admitted === 1))
+  } finally {
+    resolveModelInfoImpl = prev
+  }
+})
+
+test('识图：resolveModelInfo 抛错只写 diag、不阻断，行为退化为照旧提纯', async () => {
+  const prev = resolveModelInfoImpl
+  resolveModelInfoImpl = async () => { throw new Error('resolve boom') }
+  try {
+    const t = visionChat({ provider: 'fake', model: 'fake/model' })
+    await t.svc.chatStream({ question: '看这张图', diag: true, perm: 'read-only', images: [{ mediaType: 'image/png', data: VISION_PNG }] }, t.stream)
+    assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision-model-check-fail'), '应记录 vision-model-check-fail diag')
+    assert.ok(!t.events.some(e => e[0] === 'error' && /不支持看图/.test(String(e[1] && e[1].message))), '检查失败不得误报不支持看图')
+    assert.equal(t.admittedCalls.length, 1, '检查失败仍照旧提纯')
+    assert.equal(t.followups.length, 1)
+    assert.equal(t.followups[0].content.length, 2)
+  } finally {
+    resolveModelInfoImpl = prev
+  }
 })
