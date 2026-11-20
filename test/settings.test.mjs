@@ -99,3 +99,32 @@ test('a corrupt stored value falls back to the default', () => {
 test('resetSettings returns the defaults', () => {
   assert.deepEqual(resetSettings(), defaultSettings())
 })
+
+test('image settings coerce: size default, apiKeyRef env-name only', () => {
+  const current = defaultSettings()
+  assert.equal(current['image.size'], '1536x1024')
+  assert.equal(current['image.baseUrl'], '')
+  assert.equal(current['image.model'], '')
+  assert.equal(current['image.apiKeyRef'], '')
+  const good = coerceSettings({ 'image.apiKeyRef': 'RD_IMAGE_KEY' }, current)
+  assert.equal(good.values['image.apiKeyRef'], 'RD_IMAGE_KEY')
+  const badRef = coerceSettings({ 'image.apiKeyRef': 'not a name!' }, current)
+  assert.equal(badRef.errors.length, 1)
+})
+
+test('image.apiKeyRef secret never leaks its environment value in exports', () => {
+  const settings = { ...defaultSettings(), 'image.apiKeyRef': 'RD_TEST_IMAGE_KEY' }
+  const previous = process.env.RD_TEST_IMAGE_KEY
+  process.env.RD_TEST_IMAGE_KEY = 'super-secret-image-key'
+  const resolved = resolveSecret(settings, 'image.apiKeyRef')
+  assert.equal(resolved.present, true)
+  assert.equal(resolved.value, 'super-secret-image-key')
+  const rows = describeSettings(settings)
+  const row = rows.find(item => item.key === 'image.apiKeyRef')
+  assert.equal(row.secret, true)
+  assert.equal(row.value, 'RD_TEST_IMAGE_KEY')
+  assert.ok(!JSON.stringify(rows).includes('super-secret-image-key'))
+  assert.ok(!JSON.stringify(settings).includes('super-secret-image-key'))
+  if (previous === undefined) delete process.env.RD_TEST_IMAGE_KEY
+  else process.env.RD_TEST_IMAGE_KEY = previous
+})

@@ -1284,3 +1284,122 @@ test('draft_image：工具 schema 不合规视为不可用', async () => {
   assert.equal(res.ok, false)
   assert.equal(res.message, '未找到可用的订阅生图工具，这一版配图暂时做不了。')
 })
+
+// ── HTTP 直连生图回退：用户自带密钥 + OpenAI 兼容接口 ─────────────────────────
+const IMAGE_KEY_ENV = 'RD_TEST_IMAGE_KEY'
+const IMAGE_KEY_VALUE = 'test-image-key-xyz'
+const HTTP_SETTINGS = {
+  'image.baseUrl': 'https://api.example.test/v1',
+  'image.model': 'gpt-image-1',
+  'image.apiKeyRef': IMAGE_KEY_ENV,
+}
+
+function withImageKey(fn) {
+  const previous = process.env[IMAGE_KEY_ENV]
+  process.env[IMAGE_KEY_ENV] = IMAGE_KEY_VALUE
+  return Promise.resolve().then(fn).finally(() => {
+    if (previous === undefined) delete process.env[IMAGE_KEY_ENV]
+    else process.env[IMAGE_KEY_ENV] = previous
+  })
+}
+
+async function withFetchStub(stub, fn) {
+  const gate = globalThis.fetch
+  globalThis.fetch = stub
+  try { return await fn() } finally { globalThis.fetch = gate }
+}
+
+async function configureHttp(fixture) {
+  const view = await fixture.svc.run({ action: 'settings', patch: HTTP_SETTINGS })
+  assert.equal(view.ok, true, view.message)
+  return fixture
+}
+
+function okJson(payload, status = 200) {
+  return async () => ({ ok: true, status, json: async () => payload })
+}
+
+test('draft_image：无订阅工具时走 HTTP 直连成功，且密钥不出回包', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const calls = []
+  const stub = async (url, opts) => {
+    calls.push({ url, opts })
+    return okJson({ data: [{ b64_json: PNG_BYTES.toString('base64') }] })()
+  }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '带密钥配图'))
+    assert.equal(res.ok, true, res.message)
+    assert.equal(res.action, 'draft_image')
+    assert.equal(res.image.mediaType, 'image/png')
+    assert.ok(res.image.data.length > 0)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].url, 'https://api.example.test/v1/images/generations')
+    assert.equal(calls[0].opts.method, 'POST')
+    assert.equal(calls[0].opts.headers.authorization, 'Bearer ' + IMAGE_KEY_VALUE)
+    const body = JSON.parse(calls[0].opts.body)
+    assert.deepEqual(body, { model: 'gpt-image-1', prompt: '带密钥配图', n: 1, size: '1536x1024' })
+    assert.ok(!JSON.stringify(res).includes(IMAGE_KEY_VALUE), '回包不得泄漏密钥')
+  }))
+})
+
+test('draft_image：HTTP 鉴权失败返回明确中文错误，不泄漏密钥', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const stub = async () => ({ ok: false, status: 401, json: async () => ({}) })
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+    assert.equal(res.ok, false)
+    assert.match(res.message, /鉴权失败/)
+    assert.ok(!res.message.includes(IMAGE_KEY_VALUE), '错误文案不得回显密钥')
+  }))
+})
+
+test('draft_image：HTTP 无图返回明确中文错误', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const stub = async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+    assert.equal(res.ok, false)
+    assert.match(res.message, /没有返回图片/)
+  }))
+})
+
+test('draft_image：工具优先于 HTTP，两个都配时只走工具不联网', async () => {
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: [] } }))
+  const fixture = await configureHttp(await makeApprovedFixture(tools, true))
+  const inside = join(fixture.t.dir, 'plugins', 'subscriptions', 'images', 'tool-first.png')
+  writeFileSync(inside, PNG_BYTES)
+  tools.execute = async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: { isError: false, value: { paths: [inside] } } })) } }
+  let fetched = 0
+  const stub = async () => { fetched++; throw new Error('不应联网') }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+    assert.equal(res.ok, true, res.message)
+    assert.equal(calls.length, 1)
+    assert.equal(fetched, 0, '有订阅工具时不走 HTTP')
+  }))
+})
+
+test('draft_image：HTTP 已配置但未拍板不得调用接口', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  let fetched = 0
+  const stub = async () => { fetched++; throw new Error('不应联网') }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run({ action: 'draft_image', prompt: 'x', approved: false, collabId: fixture.collabId, decisionId: fixture.decisionId })
+    assert.equal(res.ok, false)
+    assert.equal(res.gate, 'waiting-human')
+    assert.equal(fetched, 0, '未拍板绝不能调用 HTTP 生图接口')
+  }))
+})
+
+test('draft_image：HTTP 已配置但无真人批准记录不得调用接口', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, false))
+  let fetched = 0
+  const stub = async () => { fetched++; throw new Error('不应联网') }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+    assert.equal(res.ok, false)
+    assert.equal(res.gate, 'waiting-human')
+    assert.equal(res.message, '没有找到对应的人工批准记录，不能调用订阅生图额度。')
+    assert.equal(fetched, 0, '无真人批准不得烧 HTTP 额度')
+  }))
+})

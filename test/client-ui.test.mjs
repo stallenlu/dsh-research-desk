@@ -9,6 +9,14 @@ import { dirname, join } from 'node:path'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const src = await readFile(join(root, 'lib', 'client.js'), 'utf8')
 
+test('image settings page exists with plain-language key/billing copy', () => {
+  assert.ok(src.includes("settingsPage === 'image'"), 'image settings page branch must exist')
+  assert.ok(src.includes('生图配置'), 'image settings entry label missing')
+  assert.ok(src.includes('环境变量名，不是密钥本身'), 'secretRef label must say env-var-name not the key')
+  assert.ok(src.includes('密钥不写进科灵台、不随导出带走；生图按张计费'), 'plain-language key/billing tip missing')
+  assert.ok(src.includes("r.key.indexOf('image.') === 0"), 'image settings rows must be rendered')
+})
+
 test('four-zone testids and empty-state copy present', () => {
   for (const id of ['collab-goal', 'collab-stage', 'collab-needs-decision', 'collab-timeline', 'collab-overview', 'collab-decisions']) {
     assert.ok(src.includes("'data-testid': '" + id + "'"), 'missing testid ' + id)
