@@ -763,12 +763,13 @@ test('approval 纯函数：风险判定与权限只降级不升级', async () =>
 test('全局 kelin.role 声明存在；本次合作角色经边界消息注入而非 meta', async () => {
   assert.ok(SETTING_DEFS.some(d => d.key === 'kelin.role' && d.options && d.options.join(',') === 'lead,methodologist,engineer,analyst'))
   const injected = []
+  const followups = []
   const appliedPerms = []
   const events = []
   const createMeta = []
   const agent = {
     inject: b => injected.push(b),
-    followup: () => {},
+    followup: m => followups.push(m),
     whenIdle: async () => {},
     session: { deriveMessages: () => [] },
   }
@@ -789,4 +790,8 @@ test('全局 kelin.role 声明存在；本次合作角色经边界消息注入�
   assert.ok(createMeta.every(m => !m || (!m.kelinRole && !m.role)), '角色不得写进 meta')
   assert.deepEqual(appliedPerms, ['read-only'])
   assert.ok(events.some(e => e[0] === 'waiting-human'), '升级请求应产生 waiting-human')
+  // 无图片：followup 内容与改造前一致，仍是单条纯文本块。
+  assert.equal(followups.length, 1)
+  assert.deepEqual(followups[0].content, [{ type: 'text', text: '你好' }])
+  assert.ok(events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision' && e[1].imageCount === 0 && e[1].admitted === 0))
 })

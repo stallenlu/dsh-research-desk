@@ -572,9 +572,9 @@ test('后端路由竞态：404 自动重试一次并把失败真相留痕，不�
   assert.ok(src.includes('后端路由没挂上'), 'persistent 404 must show a plain-language cause')
   assert.ok(src.includes('baseURI'), 'diagnostic must capture the real page base')
 })
-test('三处装饰开关诚实化：识图/协作标注未接入，权限标当前只读', () => {
-  assert.ok(src.includes('识图·未接入') && src.includes('disabled: true'), 'vision button must be disabled and honestly labeled')
-  assert.ok(src.includes('图片识别还没接入'), 'vision disabled tooltip must explain why')
+test('装饰开关诚实化：识图已接入、协作已接入，权限标当前只读', () => {
+  assert.ok(src.includes("className: 'md-ctool md-ctool-vision' + (images.length") && !src.includes('识图·未接入'), 'vision button must be enabled and no longer labeled 未接入')
+  assert.ok(src.includes('让科灵看这张图') && src.includes('选图片给科灵看'), 'vision tooltip must explain how to use real image recognition')
   assert.ok(src.includes('智能体团队协作') && src.includes('已接入'), 'teamCollab must be shown as connected (real capability)')
   assert.ok(src.includes('md-settings-tip') && src.includes('靶心按钮'), 'teamCollab tip must point to the target button')
   assert.ok(src.includes("' · 当前只读'"), 'perm row must show it currently runs read-only')
@@ -606,6 +606,19 @@ test('搜索范围：默认搜全部会话，可勾选多个会话限定搜索�
   assert.ok(src.includes('selectedSearchChats.has(String(x && x.id))'), 'filter must match result chat ids against selection')
   assert.ok(src.includes('toggleSearchChat(c.id)') && src.includes('md-chatsearch-chip'), 'each chat must be a toggleable scope chip')
   assert.ok(src.includes('!selectedSearchChats && results.length === 1'), 'auto-jump only when scope is 全部, so scoped searches show the list first')
+})
+
+test('识图前端：识图按钮可用、不再标注未接入', () => {
+  assert.ok(!src.includes("'识图·未接入'"), 'vision button text must not say 未接入')
+  assert.ok(!src.includes('识图（尚未接入）'), 'vision aria-label must not say 尚未接入')
+  assert.ok(!src.includes('图片识别还没接入'), 'vision title must not say not connected')
+  assert.ok(src.includes("key: 'vision'") && src.includes("md-ctool-vision"), 'vision button must exist')
+  assert.ok(src.includes("className: 'md-ctool md-ctool-vision' + (images.length"), 'vision button must not be hardcoded disabled')
+  assert.ok(src.includes('visionInputRef.current && visionInputRef.current.click()'), 'vision button must open the image picker')
+  assert.ok(src.includes("accept: 'image/png,image/jpeg,image/webp,image/gif'"), 'hidden image input must accept image types only')
+  assert.ok(src.includes('FileReader') && src.includes('readAsDataURL'), 'images must be read as base64 data URL')
+  assert.ok(src.includes('images: (images || []).map'), 'send payload must carry images')
+  assert.ok(src.includes('library.activeChatId])') && src.includes(', images, rdDocs,'), 'send deps must include images')
 })
 
 test('会话归属：发送前把服务端 activeChatId 对齐到界面显示的会话，避免回答落进旧会话', () => {
