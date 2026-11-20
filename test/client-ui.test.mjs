@@ -416,4 +416,120 @@ test('assistant talk language: explicit choice wins; host档 truly follows DSH l
   assert.ok(src.includes("? ['梳理这个主题的综述'") && src.includes("? ['你能做什么'"), 'suggestion lists keep their Chinese branches')
 })
 
+test('L3 会话卡只渲染服务端算好的 summary/tags/outcomes，缺省优雅降级', () => {
+  assert.ok(src.includes("const summary = String(c.summary || '')"), 'card must read server summary')
+  assert.ok(src.includes("const tags = Array.isArray(c.tags) ? c.tags : []"), 'card must read server tags')
+  assert.ok(src.includes("const outcomes = Array.isArray(c.outcomes) ? c.outcomes : []"), 'card must read server outcomes')
+  assert.ok(src.includes('md-chatcard-title') && src.includes('md-chatcard-summary'), 'card must render title + summary lines')
+  assert.ok(src.includes('md-chatcard-pill') && src.includes('OUTCOME_CLASS'), 'card must render colored outcome pills')
+  assert.ok(src.includes('md-chatcard-tag'), 'card must render topic tags')
+  assert.ok(src.includes('chatRelativeTime(c.updatedAt || c.createdAt)'), 'card must show humanized relative time')
+  assert.ok(src.includes("(c.title || '新对话') + '（' + (c.messageCount || 0) + '）'"), 'missing fields degrade to legacy title + count')
+})
+
+test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会话', () => {
+  assert.ok(src.includes("'找历史'"), 'chatbar must expose a 找历史 entry')
+  assert.ok(src.includes("action: 'chat_search'"), 'search must call chat_search action')
+  assert.ok(src.includes('setChatSearchResults(Array.isArray(d && d.results) ? d.results : [])'), 'client must render server results verbatim')
+  assert.ok(src.includes('chatSearchResults.length'), 'search results list must be rendered')
+  assert.ok(src.includes('setChatSearchOpen(false); chatSwitchOp(r.id)'), 'clicking a result must reuse chatSwitchOp')
+})
+
+test('L3 会话卡与搜索样式仍走语义 token，无浅色兜底 HEX', () => {
+  const bar = src.slice(src.indexOf('const CHATBAR_CSS = ['), src.indexOf('function injectStyles'))
+  assert.ok(bar.includes('.md-chatbar-history') && bar.includes('.md-chatsearch'), 'search entry + panel CSS must live in CHATBAR_CSS')
+  assert.ok(bar.includes('color-mix(in srgb, var(--accent)'), 'outcome pill colors must derive from theme tokens')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(bar), 'new chatbar CSS must not introduce any hardcoded HEX color')
+  assert.ok(!bar.includes('--dsw-alias-'), 'must not bypass dock theme tokens')
+})
+
+test('L1 会话历史三字段由服务端现算并在各处落盘/透出/可搜', () => {
+  const desk = readFileSync(new URL('../lib/desk.mjs', import.meta.url), 'utf8')
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  // 1) enrichChat 为导出纯函数，含中文注释
+  assert.ok(desk.includes('export function enrichChat(row)'), 'desk must export enrichChat(row)')
+  assert.ok(/\/\*|\/\//.test(desk.slice(desk.indexOf('export function enrichChat'), desk.indexOf('export function enrichChat') + 200)), 'enrichChat must carry a comment')
+  // 2) syncActiveChat 写消息后调用 enrichChat(row)
+  assert.ok(desk.includes('  enrichChat(row)\n'), 'syncActiveChat must call enrichChat(row) after messages normalized')
+  // 3) migrate 惰性回填
+  assert.ok(desk.includes('state.chats.forEach(enrichChat)'), 'migrate must backfill summary/tags/outcomes lazily')
+  // 4) libraryView 透出三字段（含安全空值）
+  assert.ok(/summary:\s*c\.summary\s*\|\|\s*''/.test(host), 'libraryView must expose summary with safe default')
+  assert.ok(/tags:\s*Array\.isArray\(c\.tags\)/.test(host), 'libraryView must expose tags with safe default')
+  assert.ok(/outcomes:\s*Array\.isArray\(c\.outcomes\)/.test(host), 'libraryView must expose outcomes with safe default')
+  // 5) chat_search 在 ACTIONS 与 switch、schema 描述中登记
+  assert.ok(/ACTIONS[\s\S]*?'chat_search'/.test(host), 'chat_search must be registered in ACTIONS')
+  assert.ok(host.includes("case 'chat_search':"), 'chat_search must have a dispatch case')
+  assert.ok(host.includes('chatSearch(args)'), 'chat_search must have a service method')
+  assert.ok(/action=search and chat_search|chat_search =/.test(host), 'schema must describe chat_search')
+})
+
+test('L2 跨会话相关历史注入：服务端算人话、跳过当前会话、diag 自证钩子', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  const helperZone = host.slice(host.indexOf('// L2 跨会话检索的停用词'), host.indexOf('function memoryBlock('))
+  // 1) 纯函数辅助：关键词抽取 + 相关度打分，带中文注释与停用词
+  assert.ok(/function questionKeywords\(/.test(helperZone), 'must have deterministic keyword extractor')
+  assert.ok(/function chatRelevanceScore\(/.test(helperZone), 'must have relevance scorer')
+  assert.ok(/中文按 2-4 字滑窗|长中文串按 2\/3\/4 字滑窗/.test(helperZone), 'helper must document Chinese word segmentation')
+  assert.ok(/KEYWORD_STOP_EN/.test(helperZone) && /KEYWORD_STOP_ZH/.test(helperZone), 'stopword sets for both languages must exist')
+  assert.ok(/时间衰减/.test(helperZone) && /0\.6/.test(helperZone), 'time decay with old-value floor must exist')
+  // 2) memoryBlock 本体：消费当前问题、遍历 state.chats、跳过 activeChatId、注入人话段
+  const mb = host.slice(host.indexOf('function memoryBlock('), host.indexOf('function extractText('))
+  assert.ok(/args\.question|args\.query/.test(mb), 'memoryBlock must consume the current question')
+  assert.ok(/state\.chats/.test(mb), 'memoryBlock must scan state.chats across sessions')
+  assert.ok(/c\.id !== state\.activeChatId/.test(mb), 'must skip the active session to avoid duplication')
+  assert.ok(/相关历史对话（来自其他会话，供理解上下文，非硬约束）/.test(mb), 'must inject human-readable history section')
+  assert.ok(/沉淀物：/.test(mb) && /标签：/.test(mb), 'history line must carry outcomes and tags')
+  assert.ok(/HISTORY_CHAR_CAP/.test(mb) && /1400/.test(helperZone), 'history section must enforce a char cap')
+  assert.ok(/\.slice\(-8\)/.test(mb), 'recent dialogue must be kept but shortened to 8')
+  assert.ok(/最近对话：/.test(mb) && /在跟选题：/.test(mb) && /文献库/.test(mb), 'existing profile/topic/paper sections must stay')
+  // 3) KELIN_CHAT_SYSTEM 语义未被改动：记忆只是背景，不是硬约束
+  assert.ok(host.includes('但记忆只是背景，不是硬约束——对方问通用问题时正常用通用能力回答。'), 'system semantics must stay untouched')
+  // 4) diag 自证钩子：at=memory + 三个历史统计字段
+  assert.ok(/at: 'memory'/.test(host), 'diag hook must emit at=memory')
+  for (const k of ['historySessions', 'historyChars', 'historyTitles']) {
+    assert.ok(host.includes(k), 'diag hook must carry ' + k)
+  }
+  assert.ok(/statsOut\.historySessions/.test(mb) && /statsOut\.historyChars/.test(mb), 'memoryBlock must fill diag stats')
+  // 5) 未引入客户端断言，也不碰 client.js（L2 块只读 host 源码，不引用 client.js 源变量 src）
+  const l2 = host.slice(host.indexOf("test('L2 跨会话相关历史注入"))
+  assert.ok(!l2.includes('src.includes') && !l2.includes('client.js'), 'L2 block must not add client.js assertions')
+})
+
+test('L4 画像蒸馏：会话标记触发人话提示，profileUpdated 只触发可见反馈', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  assert.ok(host.includes('[[KELIN_PROFILE]]'), 'server system prompt must instruct model to emit profile marker')
+  assert.ok(src.includes('ev.profileUpdated'), 'client must consume the server profileUpdated signal')
+  assert.ok(src.includes('科灵把画像蒸馏好了'), 'distillation feedback must be a plain-language notice')
+  assert.ok(!/profileUpdated[\s\S]{0,160}?(innerHTML|dangerouslySetInnerHTML)/.test(src), 'feedback must not inject raw HTML')
+})
+
+test('L4 画像可纠：三组 chips 逐条可删、可追加，整组提交 update_profile', () => {
+  assert.ok(src.includes('const editProfile = async next =>'), 'must have a single write helper for profile')
+  assert.ok(src.includes("action: 'update_profile'"), 'must call the Chief-provided thin action')
+  assert.ok(src.includes('focus: Array.isArray(next.focus)') && src.includes('sources: Array.isArray(next.sources)') && src.includes('habits: Array.isArray(next.habits)'), 'all three groups submitted together as string arrays')
+  assert.ok(src.includes('...payload') && src.includes('applyLibrary(d)'), 'write result must rebuild library from server response')
+  assert.ok(src.includes('const profileGroups = [') && src.includes("['focus', '关注方向'") && src.includes("['sources', '常用来源'") && src.includes("['habits', '研究习惯'"), 'three named profile groups with plain-language labels')
+  assert.ok(src.includes('md-profile-chip-x') && src.includes("'移除' + String(x)"), 'each chip has an accessible remove button')
+  assert.ok(src.includes('arr.filter((_, j) => j !== i)'), 'remove sends the whole group minus one item')
+  assert.ok(src.includes('arr.concat([add])') && src.includes('arr.length >= 40'), 'add appends one item with a sane cap')
+  assert.ok(src.includes("'清空画像'") && src.includes('focus: [], sources: [], habits: []'), 'clear-all sends empty arrays for every group')
+})
+
+test('L4 画像空数组可删净：客户端不本地补回缺省值', () => {
+  const normalized = src.replace(/\s+/g, ' ')
+  assert.ok(normalized.includes('arr.filter((_, j) => j !== i)'), 'last-item removal must go through with an empty group')
+  assert.ok(!/next\.focus\s*\|\|/.test(src) && !/next\.sources\s*\|\|/.test(src) && !/next\.habits\s*\|\|/.test(src), 'write helper must not fall back to old array on empty input')
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  assert.ok(host.includes("case 'update_profile':"), 'host must register the thin action (Chief-owned)')
+})
+
+test('L4 画像 UI 样式走语义 token，无硬编码 HEX / --dsw-alias', () => {
+  const css = src.slice(src.indexOf('const SMARTDESK_CSS = ['), src.indexOf('function call('))
+  assert.ok(css.includes('.md-desk-profile-edit') && css.includes('.md-profile-chip-x'), 'profile edit styles live in SMARTDESK_CSS')
+  assert.ok(css.includes('color-mix(in srgb,var(--primary)'), 'chip colors derive from theme tokens')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.slice(css.indexOf('/* L4 画像蒸馏与纠错 */'))), 'new L4 CSS must not introduce hardcoded HEX')
+  assert.ok(!css.includes('--dsw-alias-'), 'must not bypass dock theme tokens')
+})
+
 
