@@ -681,7 +681,9 @@ test('粘贴分流：图片进识图队列、文档进资料登记、不支持�
   assert.ok(src.includes("if (IMAGE_MIME.indexOf(mt) >= 0) { imageFiles.push(f); continue }"), 'images must route to the image queue')
   assert.ok(src.includes("if (DOC_EXT[ext]) { docFiles.push(f); continue }"), 'documents must route to the pending-doc queue')
   assert.ok(src.includes("if (imageFiles.length) pickImages(imageFiles)"), 'image branch must feed pickImages')
-  assert.ok(src.includes("if (docFiles.length) ingestRdDocs(docFiles, true)"), 'doc branch must register docs as pending')
+  assert.ok(src.includes("if (docFiles.length) {"), 'doc branch must register docs as pending and stage their bytes')
+  assert.ok(src.includes("ingestRdDocs(docFiles, true)"), 'doc branch must register docs as pending')
+  assert.ok(src.includes("setPendingFiles(prev => added.concat(prev))"), 'doc branch must stage byte payloads into pendingFiles')
   assert.ok(src.includes("这类文件暂时放不进来，可用图片或 PDF / Word / PPT / Excel / txt / md。"), 'unsupported types must get one restrained plain-language hint')
   assert.ok(src.includes("...(markPending ? { composerPending: true } : {})"), 'pending marker must be added without changing the doc row shape')
 })
@@ -704,7 +706,20 @@ test('两阶段预览：选中即 blob 缩略图，发送才读字节，移除/�
   assert.ok(src.includes("images.forEach(x => { if (x.previewUrl && typeof URL !== 'undefined' && URL.revokeObjectURL)"), 'completed send must revoke all preview URLs')
   assert.ok(src.includes("h('button', { type: 'button', className: 'md-vision-remove'"), 'each attachment must carry a remove button')
   assert.ok(src.includes("onClick: () => removeRdDoc(doc.id)"), 'file cards must be removable')
-  assert.ok(src.includes("const removeRdDoc = id => setRdDocs(prev => prev.filter(x => x.id !== id))"), 'removeRdDoc must actually drop the row')
+  assert.ok(src.includes("setRdDocs(prev => prev.filter(x => x.id !== id))"), 'removeRdDoc must actually drop the row')
+  assert.ok(src.includes("setPendingFiles(prev => prev.filter(x => x.name !== doc.name))"), 'removing a file card must also drop its staged bytes')
+})
+
+test('文件附件随消息发送：pendingFiles 字节入 payload，done 清理，移除同步', () => {
+  assert.ok(src.includes("const [pendingFiles, setPendingFiles] = useState([])"), 'staged file bytes must be a dedicated non-persisted state')
+  assert.ok(src.includes("const readFileBase64 = f => new Promise((resolve, reject) => {"), 'file bytes must be read via FileReader')
+  assert.ok(src.includes("reader.readAsDataURL(f)"), 'file bytes must come from readAsDataURL')
+  assert.ok(src.includes("resolve(i >= 0 ? s.slice(i + 1) : s)"), 'dataURL prefix must be stripped before staging')
+  assert.ok(src.includes("files: (pendingFiles || []).map(x => ({ name: x.name, data: x.data })),"), 'chat_stream payload must carry staged file bytes')
+  assert.ok(src.includes("setPendingFiles([])"), 'done must clear staged bytes so they are sent once')
+  const payloadBlock = src.slice(src.indexOf('files: (pendingFiles'), src.indexOf('rules: (rules'))
+  assert.ok(!payloadBlock.includes("'data:'"), 'file payload must never carry a data: prefix')
+  assert.ok(src.includes("onChange: e => { intakeFiles(e.target.files); e.target.value = '' } }),"), 'main file input must route through intakeFiles so selected files show above the composer')
 })
 
 test('识图 payload：发送时读出的 data 是纯 base64，不带 data: 前缀', () => {
@@ -727,6 +742,16 @@ test('文件卡片：扩展徽标+文件名+大小，复用语义 class 且不�
   const cssEnd = src.indexOf("',\n", cssEndName)
   const css = src.slice(cssStart, cssEnd)
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css), 'new card CSS must use semantic tokens, not hardcoded hex')
+})
+
+test('靠左修正：.md-composer-native 覆盖基类 align-items:flex-end，附件/输入条左对齐', () => {
+  const at = src.indexOf('.md-composer-native{')
+  assert.ok(at > 0, 'native composer rule must exist')
+  const end = src.indexOf('}', at)
+  const rule = src.slice(at, end)
+  assert.ok(rule.includes('align-items:stretch'), 'column-direction cross axis is horizontal: must override inherited align-items:flex-end with stretch so the rail/textarea/tools align left')
+  assert.ok(rule.includes('flex-direction:column'), 'native composer must remain a column flex layout')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(rule), 'CSS fix must not introduce hardcoded hex')
 })
 
 

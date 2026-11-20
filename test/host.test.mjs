@@ -814,6 +814,7 @@ function visionChat(current) {
   const followups = []
   const events = []
   const admittedCalls = []
+  const fileAdmitCalls = []
   const agent = {
     inject: b => injected.push(b),
     followup: m => followups.push(m),
@@ -825,7 +826,10 @@ function visionChat(current) {
     get: name => (name === 'agents'
       ? { create: async () => ({ agent, dispose: () => {} }) }
       : name === 'attachments'
-        ? { admitPromptContent: async parts => { admittedCalls.push(parts); return parts.map((p, i) => ({ type: 'image', url: 'attachment://img' + i })) } }
+        ? {
+            admitPromptContent: async parts => { admittedCalls.push(parts); return parts.map((p, i) => ({ type: 'image', url: 'attachment://img' + i })) },
+            admitEncodedFile: async payload => { fileAdmitCalls.push(payload); return { kind: 'file', digest: 'sha256:' + payload.name, name: payload.name } },
+          }
         : ctx.get(name)),
     on: () => () => {},
     permissionPresets: { set: async () => {} },
@@ -833,7 +837,7 @@ function visionChat(current) {
   process.env.DSH_HOME = join(tempHome, 'case-vision-' + caseIndex++)
   const svc = createService(chatCtx)
   const stream = { write: (t, d) => events.push([t, d]), close: () => {} }
-  return { svc, stream, events, followups, admittedCalls, injected }
+  return { svc, stream, events, followups, admittedCalls, fileAdmitCalls, injected }
 }
 
 test('识图：非视觉模型拦截——报错 + diag，图片不提纯、不并入 followup，文字照常', async () => {
@@ -888,4 +892,35 @@ test('识图：resolveModelInfo 抛错只写 diag、不阻断，行为退化为�
   } finally {
     resolveModelInfoImpl = prev
   }
+})
+
+// ── 文件随消息进 agent：走 DSH 原生 attachments.admitEncodedFile ─────────────
+const FILE_DATA = Buffer.from('hello research doc').toString('base64') // canonical base64，长度≥16
+
+test('文件：随 chat_stream 的 files 经 admitEncodedFile 提纯，file 块并入 followup', async () => {
+  const t = visionChat({ provider: 'fake', model: 'fake/model' })
+  await t.svc.chatStream({ question: '分析这份文件', perm: 'read-only', files: [{ name: 'report.pdf', data: FILE_DATA }] }, t.stream)
+  assert.equal(t.fileAdmitCalls.length, 1, '应调用一次 admitEncodedFile')
+  assert.deepEqual(t.fileAdmitCalls[0], { data: FILE_DATA, name: 'report.pdf' }, '传给 attachment 服务的应是 {data,name}')
+  assert.equal(t.followups.length, 1)
+  assert.equal(t.followups[0].content.length, 2)
+  assert.deepEqual(t.followups[0].content[0], { type: 'file', attachment: { kind: 'file', digest: 'sha256:report.pdf', name: 'report.pdf' } })
+  assert.deepEqual(t.followups[0].content[1], { type: 'text', text: '分析这份文件' })
+  assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'files' && e[1].count === 1))
+})
+
+test('文件：无 files 时行为与改造前完全一致，仍只发文本且不调用 admitEncodedFile', async () => {
+  const t = visionChat({ provider: 'fake', model: 'fake/model' })
+  await t.svc.chatStream({ question: '你好', perm: 'read-only' }, t.stream)
+  assert.equal(t.fileAdmitCalls.length, 0, '无 files 不得调用 admitEncodedFile')
+  assert.deepEqual(t.followups[0].content, [{ type: 'text', text: '你好' }])
+  assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'files' && e[1].count === 0))
+})
+
+test('文件：非法 base64 跳过并 diag，不阻断文字对话', async () => {
+  const t = visionChat({ provider: 'fake', model: 'fake/model' })
+  await t.svc.chatStream({ question: '继续', perm: 'read-only', files: [{ name: 'bad.pdf', data: '!!!not-base64!!!' }] }, t.stream)
+  assert.equal(t.fileAdmitCalls.length, 0, '非法字节不得提纯')
+  assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'file-bad-base64' && e[1].name === 'bad.pdf'))
+  assert.deepEqual(t.followups[0].content, [{ type: 'text', text: '继续' }], '文字对话照常')
 })
