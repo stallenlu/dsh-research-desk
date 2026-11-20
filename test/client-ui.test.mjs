@@ -333,3 +333,22 @@ test('collab has a single tab mapping and dead view code is gone', () => {
   }
   assert.ok(src.includes("['lab', '虚空']"), '虚空 lab tab retained')
 })
+
+test('human approval resumes collab only when approve clears all pending decisions', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  // 服务端算好 needResume 信号：approve 且无其它 pending 才续跑
+  assert.ok(host.includes("const needResume = choice === 'approve' && !stillPending"), 'server must gate resume on approve + no pending')
+  assert.ok(host.includes('needResume, resumeMessage:'), 'server must return needResume + human resumeMessage to client')
+  assert.ok(host.includes('status: stillPending ? \'waiting-human\' : \'active\''), 'status must stay waiting-human while other decisions pending')
+  // 客户端只渲染人话 + 触发既有续跑路径（不改 agent 编排）
+  assert.ok(src.includes('needResume = !!(d && d.needResume)'), 'client must read server resume signal')
+  assert.ok(src.includes('if (needResume) collabLead(resumeGoal, collabId)'), 'client must call existing collabLead resume path')
+  assert.ok(src.includes('resumeGoal = collabGoalText(row)'), 'client must reuse collab goal for resume')
+})
+
+test('schedule hero has bottom spacing before calendar area', () => {
+  const svAt = src.indexOf("const scheduleView = h('div', { className: 'md-page'")
+  const heroLine = src.slice(svAt, svAt + 400).split('\n').find(l => l.includes("key: 'hero'"))
+  assert.ok(heroLine && heroLine.includes('marginBottom: 24'), 'schedule hero must have bottom margin so it does not touch calendar area')
+})
+
