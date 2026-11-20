@@ -397,7 +397,7 @@ test('chat sessions bar matches dock theme, has visible labels and distinguishab
   assert.ok(bar.includes('var(--card)') && bar.includes('var(--ink)'), 'chatbar must use .md-root theme tokens (--card/--ink)')
   assert.ok(!/#(fff|f1f5f9|e2e8f0|cbd5e1|e4eaf2)/i.test(bar), 'chatbar must not hardcode light color fallbacks')
   assert.ok(!bar.includes('--dsw-alias-'), 'chatbar must not bypass dock theme via --dsw-alias variables')
-  assert.ok(src.includes("onClick: chatNewOp }, [I({ name: 'plus', size: 14 }), '新建'])"), 'new-session button must show a visible 新建 label')
+  assert.ok(src.includes("F({ key: 'new', icon: 'plus', label: '新建对话'") && src.includes("F({ key: 'find', icon: 'search', label: '找历史对话'"), 'new/find buttons must be icon-only F buttons with tooltip labels')
   const desk = readFileSync(new URL('../lib/desk.mjs', import.meta.url), 'utf8')
   assert.ok(desk.includes('function autoTitleChat(row)'), 'server must auto-name sessions from first question')
   assert.ok(desk.includes('  autoTitleChat(row)\n'), 'syncActiveChat must apply auto-title on message write')
@@ -428,7 +428,7 @@ test('L3 会话卡只渲染服务端算好的 summary/tags/outcomes，缺省优�
 })
 
 test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会话', () => {
-  assert.ok(src.includes("'找历史'"), 'chatbar must expose a 找历史 entry')
+  assert.ok(src.includes("icon: 'search', label: '找历史对话'"), 'chatbar must expose a 找历史 entry as F icon button + tooltip')
   assert.ok(src.includes("action: 'chat_search'"), 'search must call chat_search action')
   assert.ok(src.includes('setChatSearchResults(Array.isArray(d && d.results) ? d.results : [])'), 'client must render server results verbatim')
   assert.ok(src.includes('chatSearchResults.length'), 'search results list must be rendered')
@@ -437,7 +437,7 @@ test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会
 
 test('L3 会话卡与搜索样式仍走语义 token，无浅色兜底 HEX', () => {
   const bar = src.slice(src.indexOf('const CHATBAR_CSS = ['), src.indexOf('function injectStyles'))
-  assert.ok(bar.includes('.md-chatbar-history') && bar.includes('.md-chatsearch'), 'search entry + panel CSS must live in CHATBAR_CSS')
+  assert.ok(bar.includes('.md-chatsearch'), 'search panel CSS must live in CHATBAR_CSS')
   assert.ok(bar.includes('color-mix(in srgb, var(--accent)'), 'outcome pill colors must derive from theme tokens')
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(bar), 'new chatbar CSS must not introduce any hardcoded HEX color')
   assert.ok(!bar.includes('--dsw-alias-'), 'must not bypass dock theme tokens')
@@ -530,6 +530,30 @@ test('L4 画像 UI 样式走语义 token，无硬编码 HEX / --dsw-alias', () =
   assert.ok(css.includes('color-mix(in srgb,var(--primary)'), 'chip colors derive from theme tokens')
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.slice(css.indexOf('/* L4 画像蒸馏与纠错 */'))), 'new L4 CSS must not introduce hardcoded HEX')
   assert.ok(!css.includes('--dsw-alias-'), 'must not bypass dock theme tokens')
+})
+test('C+E 语义召回：粗召回补位 + 同义词表 + 一行候选清单交给 LLM 自判', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  const helperZone = host.slice(host.indexOf('// L2 跨会话检索的停用词'), host.indexOf('function memoryBlock('))
+  assert.ok(/KEYWORD_SYNONYMS/.test(helperZone) && /function expandSynonyms\(/.test(helperZone), 'must have research synonym table + expander')
+  assert.ok(/代号/.test(helperZone) && /别名/.test(helperZone) && /命名/.test(helperZone), 'synonyms must cover alias/naming relations')
+  assert.ok(!/咖啡|作息|手冲/.test(helperZone), 'synonym table must NOT include life words, to keep semantic test falsifiable')
+  assert.ok(/C 方案/.test(helperZone) && /HISTORY_CANDIDATE_CAP = 12/.test(helperZone), 'must have coarse-recall candidate cap')
+  const mb = host.slice(host.indexOf('function memoryBlock('), host.indexOf('function extractText('))
+  assert.ok(/expandSynonyms\(questionKeywords\(question\)\)/.test(mb), 'keywords must be expanded through synonym table')
+  assert.ok(/\.slice\(0, HISTORY_CANDIDATE_CAP\)/.test(mb), 'coarse recall must cap at candidate limit')
+  assert.ok(/picked\.length < HISTORY_CANDIDATE_CAP/.test(mb) && /byRecent/.test(mb), 'zero-hit sessions must be backfilled by recency')
+  assert.ok(/请自行判断哪些与当前问题相关，无关项忽略/.test(mb), 'header must delegate relevance judgment to the answering LLM')
+  assert.ok(!/filter\(x => x\.score > 0\)[\s\S]{0,120}\.slice\(0, 4\)/.test(mb), 'must not keep the old hard top4 cutoff')
+  assert.ok(/沉淀物：/.test(mb) && /标签：/.test(mb), 'one-line candidates must still carry plain-language outcomes/tags')
+})
+
+test('模型列表加载失败可重试，面板不误导显示科灵模型', () => {
+  assert.ok(/const \[modelsStatus, setModelsStatus\] = useState\('loading'\)/.test(src), 'must track model load status')
+  assert.ok(/const loadModels = useCallback\(async \(\) =>/.test(src), 'must have a reusable loadModels helper')
+  assert.ok(/setSettingsPage\('model'\); loadModels\(\)/.test(src), 'opening the model page must reload the list')
+  assert.ok(/modelsStatus === 'error'/.test(src) && src.includes('md-model-retry') && src.includes('重新读取'), 'failed load must offer a retry button')
+  assert.ok(/modelsStatus === 'loading' \? '正在读取可用模型…'/.test(src), 'loading state must show honest loading copy')
+  assert.ok(!src.includes("'科灵模型'"), 'fallback label must not pretend a 科灵模型 exists')
 })
 
 
