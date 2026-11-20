@@ -10,7 +10,7 @@
 //    协议与 lib/llm.mjs 逐字对应（block-end 文本块 + finish/stop）。
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -1011,4 +1011,170 @@ test('文件：非法 base64 跳过并 diag，不阻断文字对话', async () =
   assert.equal(t.fileAdmitCalls.length, 0, '非法字节不得提纯')
   assert.ok(t.events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'file-bad-base64' && e[1].name === 'bad.pdf'))
   assert.deepEqual(t.followups[0].content, [{ type: 'text', text: '继续' }], '文字对话照常')
+})
+
+// ── 场景化配图：借订阅生图工具（draft_image） ───────────────────────────────
+function draftImageCtx(tools) {
+  return {
+    get: name => {
+      if (name === 'llm') return llm
+      if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'fake', model: 'fake/model' }) }
+      if (name === 'tools') return tools
+      return undefined
+    },
+  }
+}
+const DRAFT_DEF = { parameters: { properties: { prompt: { type: 'string' } } }, output: { schema: { properties: { paths: { type: 'array' } } } } }
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
+function draftImageTools(makeResult) {
+  const calls = []
+  const tools = {
+    executable: name => (name === 'dsh_subscriptions_image_generate' ? DRAFT_DEF : null),
+    selectExecutor: () => ({ describe: () => ({ schemas: [{ name: 'dsh_subscriptions_image_generate' }] }) }),
+    execute: async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: makeResult(c) })) } },
+  }
+  return { tools, calls }
+}
+function seedDraftImage(dir, fileName) {
+  const imagesDir = join(dir, 'plugins', 'subscriptions', 'images')
+  mkdirSync(imagesDir, { recursive: true })
+  const file = join(imagesDir, fileName)
+  writeFileSync(file, PNG_BYTES)
+  return file
+}
+async function seedHumanApproval(svc, collabId, decisionId) {
+  return await svc.run({ action: 'collab_decision_answer', collabId, decisionId, choice: 'approve', by: 'human' })
+}
+async function seedPendingOutbound(svc, collabId) {
+  const r = await svc.run({ action: 'collab_decision_ask', collabId, point: 'risk:outbound:给这份初稿配一张图', payload: { scenario: 'draft_image' } })
+  return r.decisionId
+}
+async function makeApprovedFixture(tools, approved) {
+  const t = freshService()
+  const png = seedDraftImage(t.dir, 'ok.png')
+  const plain = createService(draftImageCtx(tools))
+  const created = await plain.run({ action: 'collab_create', title: '配图审批', goal: { text: '配图', source: 'human' } })
+  const collabId = created.collab.id
+  const decisionId = await seedPendingOutbound(plain, collabId)
+  if (approved) await seedHumanApproval(plain, collabId, decisionId)
+  const svc = createService(draftImageCtx(tools))
+  return { t, png, collabId, decisionId, svc }
+}
+const approvedArgs = (collabId, decisionId, prompt) => ({ action: 'draft_image', prompt, approved: true, collabId, decisionId })
+
+test('draft_image：未拍板停在 waiting-human 且不调用 execute', async () => {
+  const t = freshService()
+  const png = seedDraftImage(t.dir, 'gated.png')
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: [png] } }))
+  const svc = createService(draftImageCtx(tools))
+  const res = await svc.run({ action: 'draft_image', prompt: '给初稿配图' })
+  assert.equal(res.ok, false)
+  assert.equal(res.gate, 'waiting-human')
+  assert.equal(res.message, '配图会调用订阅生图额度，需要在决策区拍板后才能生成。')
+  assert.equal(calls.length, 0, '未拍板绝不能执行生图')
+})
+
+test('draft_image：approved:true 但无真实人工 approve 记录时拒绝（防输入伪造绕过闸门）', async () => {
+  const t = freshService()
+  const png = seedDraftImage(t.dir, 'bypass.png')
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: [png] } }))
+  const plain = createService(draftImageCtx(tools))
+  const created = await plain.run({ action: 'collab_create', title: '配图审批', goal: { text: '配图', source: 'human' } })
+  const collabId = created.collab.id
+  const decisionId = await seedPendingOutbound(plain, collabId)
+  const svc = createService(draftImageCtx(tools))
+  const res = await svc.run(approvedArgs(collabId, decisionId, '想绕过拍板'))
+  assert.equal(res.ok, false)
+  assert.equal(res.gate, 'waiting-human')
+  assert.equal(res.message, '没有找到对应的人工批准记录，不能调用订阅生图额度。')
+  assert.equal(calls.length, 0, 'pending 未拍板绝不能执行')
+})
+
+test('draft_image：真实人工 approve 后才执行，calls 形状 / 可中止 signal / 返回图片正确', async () => {
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: ['x'] } }))
+  const { t, png, collabId, decisionId, svc } = await makeApprovedFixture(tools, true)
+  const inside = join(t.dir, 'plugins', 'subscriptions', 'images', 'approved.png')
+  writeFileSync(inside, PNG_BYTES)
+  tools.execute = async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: { isError: false, value: { paths: [inside] } } })) } }
+  const res = await svc.run(approvedArgs(collabId, decisionId, '给这份初稿配一张图'))
+  assert.equal(res.ok, true, res.message)
+  assert.equal(res.action, 'draft_image')
+  assert.equal(res.image.mediaType, 'image/png')
+  assert.equal(typeof res.image.data, 'string')
+  assert.ok(res.image.data.length > 0)
+  assert.equal(calls.length, 1, '批准后才执行一次 execute')
+  const payload = calls[0]
+  assert.ok(payload.signal && typeof payload.signal.throwIfAborted === 'function', 'execute 必须收到可中止 signal')
+  const call = payload.calls[0]
+  assert.equal(call.type, 'tool-call')
+  assert.equal(call.name, 'dsh_subscriptions_image_generate')
+  assert.ok(call.id.startsWith('draft-image:'))
+  assert.deepEqual(JSON.parse(call.arguments), { prompt: '给这份初稿配一张图' })
+  assert.ok(!JSON.stringify(res).includes(inside), '不得把磁盘路径泄漏给客户端')
+})
+
+test('draft_image：同一审批令牌用过一次后不可复用（一次性）', async () => {
+  const { tools } = draftImageTools(() => ({ isError: false, value: { paths: [] } }))
+  const { t, png, collabId, decisionId, svc } = await makeApprovedFixture(tools, true)
+  const inside = join(t.dir, 'plugins', 'subscriptions', 'images', 'once.png')
+  writeFileSync(inside, PNG_BYTES)
+  let n = 0
+  tools.execute = async payload => { n++; return { results: (payload.calls || []).map(c => ({ callId: c.id, result: { isError: false, value: { paths: [inside] } } })) } }
+  const first = await svc.run(approvedArgs(collabId, decisionId, 'x'))
+  assert.equal(first.ok, true, first.message)
+  const second = await svc.run(approvedArgs(collabId, decisionId, 'x'))
+  assert.equal(second.ok, false)
+  assert.equal(second.gate, 'waiting-human')
+  assert.equal(n, 1)
+})
+
+test('draft_image：超过 40MB 的图片被拒绝（按真实文件大小）', async () => {
+  const { tools } = draftImageTools(() => ({ isError: false, value: { paths: [] } }))
+  const { t, collabId, decisionId, svc } = await makeApprovedFixture(tools, true)
+  const huge = join(t.dir, 'plugins', 'subscriptions', 'images', 'huge.png')
+  writeFileSync(huge, PNG_BYTES)
+  truncateSync(huge, 40_000_001)
+  tools.execute = async payload => ({ results: (payload.calls || []).map(c => ({ callId: c.id, result: { isError: false, value: { paths: [huge] } } })) })
+  const res = await svc.run(approvedArgs(collabId, decisionId, 'x'))
+  assert.equal(res.ok, false)
+  assert.match(res.message, /图片太大/)
+})
+
+test('draft_image：越界路径与超大文件都被白名单拒绝', async () => {
+  const t = freshService()
+  seedDraftImage(t.dir, 'inside.png')
+  const outside = join(tempHome, 'outside-secret.png')
+  writeFileSync(outside, PNG_BYTES)
+  const { tools } = draftImageTools(() => ({ isError: false, value: { paths: [outside] } }))
+  const plain = createService(draftImageCtx(tools))
+  const created = await plain.run({ action: 'collab_create', title: '配图审批', goal: { text: '配图', source: 'human' } })
+  const collabId = created.collab.id
+  const decisionId = await seedPendingOutbound(plain, collabId)
+  await seedHumanApproval(plain, collabId, decisionId)
+  const svc = createService(draftImageCtx(tools))
+  const res = await svc.run(approvedArgs(collabId, decisionId, 'x'))
+  assert.equal(res.ok, false)
+  assert.match(res.message, /路径无效/)
+  assert.ok(!JSON.stringify(res).includes(outside))
+})
+
+test('draft_image：工具不可用时诚实回落，不摆假按钮', async () => {
+  freshService()
+  const svc = createService(draftImageCtx(null))
+  const res = await svc.run(approvedArgs('c', 'd', 'x'))
+  assert.equal(res.ok, false)
+  assert.equal(res.message, '未找到可用的订阅生图工具，这一版配图暂时做不了。')
+})
+
+test('draft_image：工具 schema 不合规视为不可用', async () => {
+  freshService()
+  const badTools = {
+    executable: () => ({ parameters: { properties: { prompt: { type: 'number' } } }, output: { schema: { properties: { paths: { type: 'array' } } } } }),
+    selectExecutor: () => ({ describe: () => ({ schemas: [{ name: 'dsh_subscriptions_image_generate' }] }) }),
+    execute: async () => { throw new Error('不应执行') },
+  }
+  const svc = createService(draftImageCtx(badTools))
+  const res = await svc.run(approvedArgs('c', 'd', 'x'))
+  assert.equal(res.ok, false)
+  assert.equal(res.message, '未找到可用的订阅生图工具，这一版配图暂时做不了。')
 })

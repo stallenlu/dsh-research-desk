@@ -835,3 +835,50 @@ test('批次1+2 零新增硬编码 hex：本次新增片段不含任何 #RRGGBB 
 })
 
 
+
+// ── 场景化配图：成稿页借订阅生图（关3） ─────────────────────────────────────
+test('成稿页有场景化配图按钮：复用 md-pill、中文文案、不新增独立主行动', () => {
+  const start = src.indexOf("const studioView = h('div'")
+  assert.ok(start > 0, 'studioView must exist')
+  const cssAt = src.indexOf('const CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt > 0 ? cssAt : start + 9000)
+  assert.ok(studio.includes("key: 'illustrate'"), 'studio must have the illustrate button')
+  assert.ok(studio.includes('配一张图'), 'button label must be 中文 配一张图')
+  assert.ok(studio.includes("className: 'md-pill'"), 'illustrate button must reuse md-pill')
+  assert.ok(/studioDraft \? h\('button', \{ key: 'illustrate'/.test(studio), 'button only appears when studioDraft exists')
+  assert.equal((studio.match(/is-primary/g) || []).length, 1, 'still exactly one primary action')
+})
+test('配图接线：先问桥拍板落盘，拍板同意后才带决策 id 再调用', () => {
+  assert.ok(src.includes("action: 'draft_image'"), 'client must call draft_image')
+  assert.ok(/approved: !!approved/.test(src), 'approved intent flag must be forwarded')
+  assert.ok(/decisionId: decisionId \|\| undefined/.test(src), 'decisionId must be forwarded to server')
+  assert.ok(/runDraftImage\(prompt, false\)/.test(src), 'first call must NOT be approved')
+  assert.ok(/runDraftImage\(prompt, true, decisionId\)/.test(src), 'approval handler must call again with approved:true + decisionId')
+  assert.ok(src.includes("d.gate === 'waiting-human'"), 'must handle waiting-human gate')
+  assert.ok(/risk:outbound:给这份初稿配一张图/.test(src), 'decision point must carry outbound risk prefix')
+  assert.ok(/await answerDecision\(collabId, decisionId, 'approve'\)/.test(src), 'human approve must land before generating')
+  assert.ok(/pendingIllustrationRef\.current/.test(src), 'must remember which decision is the illustration gate')
+  const yesAt = src.indexOf("key: 'yes'")
+  assert.ok(yesAt > 0 && /approveIllustration\(/.test(src.slice(yesAt, yesAt + 900)), '共用 同意 按钮接线')
+})
+test('配图不可用如实展示服务端 message，且边界文案不替代证据核验', () => {
+  assert.ok(/notify\(String\(\(d && d\.message\) \|\| '配图暂时做不了。'\), true\)/.test(src), 'must show server message on !ok')
+  assert.ok(src.includes('配图不替代证据核验'), 'must state illustration does not replace evidence verification')
+  assert.ok(!src.includes('突出核心结论与证据链'), 'must not claim illustration covers evidence chain')
+  assert.ok(!/plugin_tools|plugin_call/.test(src.replace(/不建通用工具面板/g, '')), 'no generic tool panel')
+})
+test('场景化配图新增片段零新增硬编码 hex', () => {
+  const pick = (marker, len) => { const i = src.indexOf(marker); return i < 0 ? '' : src.slice(i, i + len) }
+  const sendAt = src.indexOf('const send = useCallback(async (text, opts)')
+  const reqAt = src.indexOf('const requestIllustration')
+  const regions = [
+    pick("const [studioIllustration", 200),
+    pick("const runDraftImage", 300),
+    reqAt > 0 && sendAt > reqAt ? src.slice(reqAt, sendAt) : '',
+    pick("key: 'illustrate'", 500),
+    pick("key: 'illus'", 500),
+    pick("const pend = pendingIllustrationRef.current", 900),
+  ].join('\n')
+  assert.ok(regions.length > 200, 'found the added fragments')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(regions), 'new UI code must not add hardcoded hex color')
+})
