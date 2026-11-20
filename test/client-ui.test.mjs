@@ -572,5 +572,14 @@ test('后端路由竞态：404 自动重试一次并把失败真相留痕，不�
   assert.ok(src.includes('后端路由没挂上'), 'persistent 404 must show a plain-language cause')
   assert.ok(src.includes('baseURI'), 'diagnostic must capture the real page base')
 })
+test('三处装饰开关诚实化：识图/协作标注未接入，权限标当前只读', () => {
+  assert.ok(src.includes('识图·未接入') && src.includes('disabled: true'), 'vision button must be disabled and honestly labeled')
+  assert.ok(src.includes('图片识别还没接入'), 'vision disabled tooltip must explain why')
+  assert.ok(src.includes('智能体团队协作（规划中）') && src.includes('尚未接入'), 'teamCollab must be shown as not connected')
+  assert.ok(src.includes('md-settings-tip') && src.includes('现在打开不会影响对话'), 'teamCollab must warn it has no effect')
+  assert.ok(src.includes("' · 当前只读'"), 'perm row must show it currently runs read-only')
+  assert.ok(src.includes('不会立刻提权'), 'perm tip must say selecting a higher tier does not escalate')
+  assert.ok(src.includes('高风险动作（装包、发包等）仍需在决策区拍板'), 'perm copy must scope high-risk to decision zone')
+})
 
 
