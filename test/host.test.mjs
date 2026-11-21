@@ -1777,6 +1777,37 @@ test('handoff 注入：超长 handoff 被字符上限截断', async () => {
   assert.ok(tail.indexOf('…') !== -1, '截断应带省略号')
 })
 
+test('diag at=memory：有 handoff 注入时回传 handoffChars/handoffPreview，无注入时为 0/空串', async () => {
+  // 1) 有 handoff：活跃会话要点注入，diag 帧必须带 >0 的 handoffChars 与非空 handoffPreview。
+  const handoff = '问：关键问题0；答：关键结论0'
+  const seed = { activeChatId: 'c_diag_handoff', chats: [{ id: 'c_diag_handoff', title: '诊断会话', messages: [{ q: '关键问题0', a: '关键结论0' }], handoff }] }
+  const t = handoffChatCtx(seed)
+  await t.svc.store.mutate('seed diag handoff', draft => {
+    draft.activeChatId = seed.activeChatId
+    draft.chats = seed.chats
+  })
+  const events = []
+  await t.svc.chatStream({ question: '接着聊', diag: true, perm: 'read-only' }, { write: (type, data) => events.push([type, data]), close: () => {} })
+  const memDiag = events.find(e => e[0] === 'diag' && e[1] && e[1].at === 'memory')
+  assert.ok(memDiag, 'diag:true 时应发出 at=memory 帧')
+  assert.ok(memDiag[1].handoffChars > 0, '有 handoff 注入时 handoffChars 必须 >0')
+  const preview = String(memDiag[1].handoffPreview)
+  mustFind(preview, '关键问题0', 'handoffPreview 应为注入文本前缀')
+  assert.ok(preview.length <= 40, 'handoffPreview 不得超过 40 字前缀')
+  // 2) 无 handoff：diag 帧两字段按约定为 0/空串。
+  const plain = handoffChatCtx(null)
+  await plain.svc.store.mutate('seed diag no-handoff', draft => {
+    draft.activeChatId = 'c_diag_plain'
+    draft.chats = [{ id: 'c_diag_plain', title: '普通会话', messages: [{ q: '你好', a: '你好' }] }]
+  })
+  const events2 = []
+  await plain.svc.chatStream({ question: '你好', diag: true, perm: 'read-only' }, { write: (type, data) => events2.push([type, data]), close: () => {} })
+  const memDiag2 = events2.find(e => e[0] === 'diag' && e[1] && e[1].at === 'memory')
+  assert.ok(memDiag2, '无 handoff 时仍应发出 at=memory 帧')
+  assert.equal(memDiag2[1].handoffChars, 0, '无 handoff 注入时 handoffChars 应为 0')
+  assert.equal(memDiag2[1].handoffPreview, '', '无 handoff 注入时 handoffPreview 应为空串')
+})
+
 test('chat_search：命中 query 的会话返回 snippet，既有字段保持', async () => {
   const { svc } = freshService({
     activeChatId: 'c_find',

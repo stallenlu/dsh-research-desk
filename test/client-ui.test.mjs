@@ -451,6 +451,9 @@ test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会
   assert.ok(src.includes('setChatSearchResults(results)'), 'client must render server results verbatim')
   assert.ok(src.includes('visibleChatSearchResults.length'), 'search results list must be rendered (scope-filtered)')
   assert.ok(src.includes('onClick: () => openSearchHit(r)'), 'clicking a result must reuse openSearchHit (switch then locate)')
+  // 命中片段必须原样上屏：结果行用现有 md-chatcard-summary 类渲染 r.snippet，零新 hex/新类。
+  const snippetAt = mustFind(src, "key: 'sn', className: 'md-chatcard-summary' }, String(r.snippet)", 'result row snippet render')
+  assert.notEqual(snippetAt, -1, 'search result row must render r.snippet via existing md-chatcard-summary class')
 })
 
 test('L3 会话卡与搜索样式仍走语义 token，无浅色兜底 HEX', () => {
