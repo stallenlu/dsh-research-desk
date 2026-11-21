@@ -1310,3 +1310,52 @@ test('关3 菜单：外部点击 capture + Esc 关闭，触发按钮排除在外
   assert.ok(src.includes("className: 'md-chatmenu md-chatlistmenu'"), 'chat 菜单专属锚点 md-chatlistmenu 缺失')
   assert.ok(src.includes("className: 'md-ctool md-cmdmenu-trigger'"), 'cmd 触发按钮专属锚点 md-cmdmenu-trigger 缺失')
 })
+
+test('关3 对话直达最早/最新按钮：位置、dockRef 复用、onClick 落点与平滑滚动兜底', () => {
+  const headStart = mustFind(src, "h('h2', { key: 't' }, '科灵')")
+  const headEnd = mustFind(src, "label: '收起对话'", headStart)
+  const headBlock = src.slice(headStart, headEnd)
+  const firstLine = headBlock.split('\n').find(l => l.includes("label: '直达最早对话'"))
+  assert.ok(firstLine, '最早对话按钮须落在 h2 科灵 与 收起对话 之间')
+  assert.ok(firstLine.includes("key: 'first'"), '最早对话按钮 key 须为 first')
+  assert.ok(firstLine.includes("icon: 'send'"), '最早对话按钮须复用现成 send 图标（无 chevUp）')
+  assert.ok(firstLine.includes('size: 13'), '最早对话按钮 size 须为 13')
+  assert.ok(firstLine.includes('dockRef.current'), '最早对话按钮 onClick 须复用 dockRef')
+  assert.ok(firstLine.includes("el.scrollTo({ top: 0, behavior: 'smooth' })"), '最早对话须平滑滚到 top:0')
+  assert.ok(firstLine.includes('catch (e) { el.scrollTop = 0 }'), '最早对话须有 scrollTop=0 兜底')
+  assert.ok(!firstLine.includes('#'), '最早对话按钮行不得含 hex 色值')
+
+  const clearIdx = mustFind(src, "title: '清空当前对话'")
+  const cmdIdx = mustFind(src, 'cmdMenuOpen ? h(', clearIdx)
+  const toolBlock = src.slice(clearIdx, cmdIdx)
+  const lastLine = toolBlock.split('\n').find(l => l.includes("label: '直达最新对话'"))
+  assert.ok(lastLine, '最新对话按钮须落在 清空当前对话 与 cmdMenuOpen 之间')
+  assert.ok(lastLine.includes("key: 'last'"), '最新对话按钮 key 须为 last')
+  assert.ok(lastLine.includes("icon: 'chevD'"), '最新对话按钮须复用现成 chevD 图标')
+  assert.ok(lastLine.includes('size: 13'), '最新对话按钮 size 须为 13')
+  assert.ok(lastLine.includes('dockRef.current'), '最新对话按钮 onClick 须复用 dockRef')
+  assert.ok(lastLine.includes("el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })"), '最新对话须平滑滚到 scrollHeight')
+  assert.ok(lastLine.includes('catch (e) { el.scrollTop = el.scrollHeight }'), '最新对话须有 scrollTop=scrollHeight 兜底')
+  assert.ok(!lastLine.includes('#'), '最新对话按钮行不得含 hex 色值')
+
+  const refLines = src.split('\n').filter(l => l.includes('ref: dockRef') && l.includes("'md-dock-scroll'"))
+  assert.equal(refLines.length, 1, '仅主会话 md-dock-scroll 绑 dockRef；成稿 studio 不绑')
+})
+
+test('关3 对话滚动条细化：仅 .md-dock-scroll 用语义 token，无自造侧边刻度', () => {
+  const ruleStart = mustFind(src, '.md-dock-scroll { flex: 1;')
+  const ruleEnd = src.indexOf('}', ruleStart)
+  assert.ok(ruleEnd !== -1, '.md-dock-scroll 规则缺少闭合括号')
+  const rule = src.slice(ruleStart, ruleEnd)
+  assert.ok(rule.includes('scrollbar-width: thin'), '.md-dock-scroll 规则须含 scrollbar-width: thin')
+  assert.ok(rule.includes('scrollbar-color: var(--line-strong) transparent'), '滚动条配色须复用语义变量，零新增 hex')
+  assert.ok(!rule.includes('#'), '.md-dock-scroll 新增声明不得含 hex 色值')
+
+  const railHits = ['md-dock-scroll-rail', 'md-dock-rail', 'md-dock-scroll-tick', 'scrollbar-tick', 'md-scroll-ticks', 'dock-scale']
+    .filter(k => src.includes(k))
+  assert.deepEqual(railHits, [], '不得自造侧边刻度/轨道组件: ' + railHits.join(','))
+
+  const studioStart = mustFind(src, '.md-studio .md-dock-scroll {')
+  const studioRule = src.slice(studioStart, src.indexOf('}', studioStart))
+  assert.ok(!studioRule.includes('scrollbar-width'), '成稿 studio 滚动容器不在本次改动范围')
+})
