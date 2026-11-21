@@ -179,7 +179,7 @@ test('status 与 models 两个动作都返回 ok', async () => {
   assert.deepEqual(status.perm, {
     current: 'read-only',
     applied: 'read-only',
-    labels: { 'read-only': '仅可查看', 'workspace-write': '工作区修改', 'danger-full-access': '完全权限' },
+    labels: { 'read-only': '仅可查看', 'workspace-write': '工作区内修改', 'danger-full-access': '完全权限' },
     upgradable: true,
     note: '按只读闸门运行；选高档仅记偏好，高风险须人工拍板',
   })

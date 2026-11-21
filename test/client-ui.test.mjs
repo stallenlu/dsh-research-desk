@@ -208,7 +208,7 @@ test('void-space run button ships lab code to the collab_run executor', () => {
 
 test('permission gate turns internal perm id into plain language (R4)', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
-  assert.ok(host.includes("const PERM_LABELS = { 'read-only': '仅可查看', 'workspace-write': '工作区修改', 'danger-full-access': '完全权限' }"), 'server-side PERM_LABELS missing')
+  assert.ok(host.includes("const PERM_LABELS = { 'read-only': '仅可查看', 'workspace-write': '工作区内修改', 'danger-full-access': '完全权限' }"), 'server-side PERM_LABELS missing')
   const line = host.split('\n').find(l => l.includes('申请的权限档「'))
   assert.ok(line, 'permission message not found')
   assert.ok(line.includes('PERM_LABELS[wantedPerm]'), 'wantedPerm must go through the label map')
@@ -832,7 +832,7 @@ test('批次1 composer 工具行有可见盾牌 indicator，文案含「当前�
   assert.ok(block.includes("I({ name: 'shield', size: 12 })"), 'must reuse DSH dsh-im shield icon via ICONS, no new SVG')
   assert.ok(block.includes("setSettingsPage('perm'); setSettingsPanelOpen(v => !v)"), 'click must open perm settings page, never elevate')
   assert.ok(block.includes('不会立刻提权'), 'perm wording must preserve 选更高档只是记下偏好/不会立刻提权')
-  assert.ok(js.includes('默认只能查看。选更高档只是记下你的偏好，不会立刻提权：科灵每次调用工具仍要你在决策区点头，实际按只读运行；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
+  assert.ok(js.includes('选择新会话的默认权限模式。当前实际按只读运行：选更高档只是记下你的偏好，不会立刻提权，科灵每次调用工具仍要你在决策区点头；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
 })
 
 test('模型胶囊 onClick 进入两级菜单 menu 根页，加载模型并切换浮层', () => {
@@ -1478,3 +1478,47 @@ test('关3 对话轮次标尺：旧侧边刻度命名负向控制仍为零', () 
     .filter(k => src.includes(k))
   assert.deepEqual(banned, [], '不得复用被禁止的侧边刻度命名: ' + banned.join(','))
 })
+  // 关3 权限设置对齐 DSH 原生：完全权限必须过风险确认门；选档只写偏好，不造提权。
+  test('关3 权限对齐：完全权限先风险确认，低档直选，取消/Esc/遮罩不改权限', () => {
+    const tierLine = src.split('\n').find(l => l.includes("['read-only', 'workspace-write', 'danger-full-access'].map(v => h('button'"))
+    assert.ok(tierLine, '三档权限按钮 map 必须还在')
+    assert.ok(tierLine.includes("v === 'danger-full-access'"), '必须单独识别完全权限档')
+    assert.ok(tierLine.includes('setPermConfirmChecked(false); setPermConfirmOpen(true); return'), '完全权限先重置勾选再开确认框，且在此返回，不得直选')
+    assert.ok(tierLine.includes('setPerm(v); closeSettings()'), '低档保持原直选行为')
+
+    const states = src.split('\n').filter(l => l.includes('useState(false)') && /permConfirm(Open|Checked)/.test(l))
+    assert.equal(states.length, 2, '权限确认需两个独立状态 open/checked')
+    assert.ok(src.includes('const [permConfirmOpen, setPermConfirmOpen]'), '确认框开关状态缺失')
+    assert.ok(src.includes('const [permConfirmChecked, setPermConfirmChecked]'), '勾选状态缺失')
+
+    const dlgAt = mustFind(src, "const permConfirmDialog = permConfirmOpen ? h(Dialog, { key: 'permConfirmDlg'", 'permission confirmation Dialog definition')
+    const dlg = src.slice(dlgAt, dlgAt + 1600)
+    assert.ok(dlg.includes("title: '确认启用完全权限？'"), '标题必须与 DSH locales.ts 逐字一致')
+    assert.ok(dlg.includes('启用后新会话减少确认步骤，可直接执行更多操作（含敏感操作、文件修改、外部命令），仅建议信任后续任务时使用'), '正文必须与 DSH 逐字一致')
+    assert.ok(dlg.includes("className: 'md-check'") && dlg.includes('我已了解风险并愿意继续'), '勾选行复用 md-check，文案与 DSH 逐字一致')
+    assert.ok(dlg.includes('取消') && dlg.includes('启用完全权限'), '两个按钮文案必须与 DSH 逐字一致')
+    assert.ok(dlg.includes('disabled: !permConfirmChecked'), '未勾选时启用按钮必须禁用')
+    assert.ok(dlg.includes("onChange: e => setPermConfirmChecked(e.target.checked)"), '勾选必须驱动 checked 状态')
+
+    const confirmAt = mustFind(dlg, "key: 'confirm'", 'confirm button')
+    const confirmBtn = dlg.slice(confirmAt, confirmAt + 240)
+    assert.ok(confirmBtn.includes("setPerm('danger-full-access')"), '确认才真正记偏好')
+    assert.ok(confirmBtn.includes('setPermConfirmOpen(false); closeSettings()'), '确认后关对话框+设置面板')
+
+    const cancelAt = mustFind(dlg, "key: 'cancel'", 'cancel button')
+    const cancelBtn = dlg.slice(cancelAt, confirmAt)
+    assert.ok(cancelBtn.includes('setPermConfirmOpen(false)'), '取消只关对话框')
+    assert.ok(!/setPerm\(/.test(cancelBtn), '取消不得调用 setPerm')
+    assert.ok(!cancelBtn.includes('closeSettings()'), '取消不得关闭设置面板')
+
+    assert.ok(dlg.includes('onClose: () => setPermConfirmOpen(false)'), 'Dialog onClose(Esc/遮罩)只关框，不改权限也不关设置面板')
+    assert.ok(!/onClose: (?:\(\) => )?\{[^}]*setPerm\(/.test(dlg.slice(0, 260)), 'onClose 不得触发 setPerm')
+
+    const themeAt = mustFind(src, "const themeDialog = themeOpen ? h(Dialog, { key: 'themeDlg'", 'themeDialog definition')
+    assert.ok(dlgAt > themeAt, '确认框定义紧随 themeDialog（同一根层区域）')
+    const mountAt = mustFind(src, '        themeDialog,\n        permConfirmDialog,\n        settingsDialog,', 'root-layer dialog mount')
+    assert.ok(mountAt > dlgAt, '确认框与 themeDialog 同挂渲染根层，不在 dock 内')
+
+    assert.ok(src.includes("const setPerm = v => { setPermMode(v); try { localStorage.setItem('rd.perm', v) } catch (e) {} }"), 'setPerm 仍只写本地偏好，不得伪造提权')
+    assert.ok(src.includes('选择新会话的默认权限模式。当前实际按只读运行'), '权限页说明改为 DSH 原生语义开头')
+  })
