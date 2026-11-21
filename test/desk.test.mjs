@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { cleanText, parseJsonLoose, isHttpUrl, toNumber } from '../lib/util.mjs'
-import { applyOps, cleanProfileList, emptyState, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD } from '../lib/desk.mjs'
+import { applyOps, cleanProfileList, diffDeclined, emptyState, filterDeclined, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD } from '../lib/desk.mjs'
 import { Store, revertChange } from '../lib/store.mjs'
 import { chunkText, retrieve, tokenize, ask } from '../lib/qa.mjs'
 
@@ -398,4 +398,55 @@ test('desk: migrateState 把非法 profileJournal 归一为空数组', () => {
   const state = migrateState({ profileJournal: '乱码' })
   assert.deepEqual(state.profileJournal, [])
   assert.deepEqual(emptyState().profileJournal, [])
+})
+
+test('desk: diffDeclined 纯函数仅抽被删条目、去重且有界（slice(-20)）', () => {
+  const before = { focus: ['被删甲', '保留乙'], sources: ['旧源'], habits: [] }
+  const after = { focus: ['保留乙', '新增丙'], sources: [], habits: [] }
+  const rows = diffDeclined(before, after, '2026-01-01T00:00:00.000Z')
+  assert.deepEqual(rows.map(row => row.item).sort(), ['旧源', '被删甲'], '只记被删项，不记新增/保留项')
+  assert.deepEqual(rows.map(row => row.group).sort(), ['focus', 'sources'])
+  assert.equal(rows[0].at, '2026-01-01T00:00:00.000Z')
+  const dup = diffDeclined({ focus: ['重复', '重复'], sources: [], habits: [] }, { focus: [], sources: [], habits: [] }, 't')
+  assert.equal(dup.length, 1, '同组重复条目只记一次')
+  const many = Array.from({ length: 25 }, (_, i) => '方向' + i)
+  const big = diffDeclined({ focus: many, sources: [], habits: [] }, { focus: [], sources: [], habits: [] }, 't')
+  assert.equal(big.length, 20, '有界 slice(-20) 与 ds-bot declinedMax 对齐')
+  assert.deepEqual(big[19].item, '方向24', '保留最近被删的 20 条')
+})
+
+test('desk: set_profile 真实删除写入 profileDeclined，新增不记', () => {
+  const state = emptyState()
+  applyOps(state, [{ op: 'set_profile', focus: ['弃用方向'], sources: ['旧库'], habits: ['旧习惯'] }])
+  // set_profile 的 [] 回退语义无法清空（clear 靠 update_profile），故用「替换」制造真实删除。
+  const res = applyOps(state, [{ op: 'set_profile', focus: ['新方向'], sources: ['旧库'], habits: ['新习惯'] }])
+  assert.equal(res.errors.length, 0)
+  const items = state.profileDeclined.map(row => row.item).sort()
+  assert.deepEqual(items, ['弃用方向', '旧习惯'], '被替换掉的旧项入册，新增项不入册')
+  assert.deepEqual(state.profileDeclined.map(row => row.group), ['focus', 'habits'], '三组按 focus/sources/habits 顺序记录')
+})
+
+test('desk: 命中 declined 的新画像写入被剔除，合法项保留', () => {
+  const state = emptyState()
+  state.profile = { focus: ['保留'], sources: [], habits: [], updatedAt: '' }
+  state.profileDeclined = [{ item: '禁提', group: 'focus', at: 't' }]
+  const res = applyOps(state, [{ op: 'set_profile', focus: ['禁提', '合法'], sources: [], habits: [] }])
+  assert.equal(res.errors.length, 0)
+  assert.deepEqual(state.profile.focus, ['合法'], '被否决项不得重新写入')
+  assert.deepEqual(filterDeclined(['禁提', '合法'], state.profileDeclined, 'focus'), ['合法'])
+})
+
+test('desk: migrateState 归一非法 profileDeclined 并封顶 20', () => {
+  const state = migrateState({ profileDeclined: '乱码' })
+  assert.deepEqual(state.profileDeclined, [])
+  assert.deepEqual(emptyState().profileDeclined, [])
+  const rows = Array.from({ length: 25 }, (_, i) => ({ item: '项' + i, group: 'focus', at: 't' }))
+  assert.equal(migrateState({ profileDeclined: rows }).profileDeclined.length, 20)
+  const dirty = migrateState({ profileDeclined: [
+    { item: '好的', group: 'sources', at: 't' },
+    { item: '坏的', group: 'other', at: 't' },
+    { item: 42, group: 'focus', at: 't' },
+    'not-an-object',
+  ] })
+  assert.deepEqual(dirty.profileDeclined.map(row => row.item), ['好的'], '非白名单组/非字符串被丢弃')
 })
