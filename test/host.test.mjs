@@ -1698,3 +1698,108 @@ test('settingsView 返回 imageToolAvailable 布尔值，探测工具但不执�
   const withoutTool = await createService(draftImageCtx(null)).run({ action: 'settings' })
   assert.equal(withoutTool.imageToolAvailable, false)
 })
+
+// ── 检查点内核：handoff 注入与 chat_search 命中片段 ────────────────────────
+function mustFind(text, marker, label, from = 0) {
+  const i = String(text).indexOf(marker, from)
+  assert.ok(i !== -1, label + ' must exist: ' + marker)
+  return i
+}
+
+function handoffChatCtx(seed) {
+  const injected = []
+  const agent = {
+    inject: b => injected.push(b),
+    followup: () => {},
+    whenIdle: async () => {},
+    session: { deriveMessages: () => [] },
+    model: { current: () => ({ provider: 'fake', model: 'fake/model' }) },
+  }
+  const localCtx = {
+    get: name => {
+      if (name === 'agents') return { create: async () => ({ agent, dispose: () => {} }) }
+      return ctx.get(name)
+    },
+    on: () => () => {},
+    permissionPresets: { set: async () => {} },
+  }
+  caseIndex += 1
+  process.env.DSH_HOME = join(tempHome, 'case-handoff-' + caseIndex)
+  const svc = createService(localCtx)
+  return { svc, injected, agent, seed }
+}
+
+test('handoff 注入：活跃会话有要点时进入记忆注入边界，措辞为非硬约束', async () => {
+  const messages = Array.from({ length: 31 }, (_, i) => ({ q: '关键问题' + i, a: '关键结论' + i }))
+  const handoff = '问：关键问题0；答：关键结论0'
+  const seed = { activeChatId: 'c_handoff', chats: [{ id: 'c_handoff', title: '关键会话', messages, handoff }] }
+  const t = handoffChatCtx(seed)
+  await t.svc.store.mutate('seed handoff', draft => {
+    draft.activeChatId = seed.activeChatId
+    draft.chats = seed.chats
+  })
+  await t.svc.chatStream({ question: '接着聊', perm: 'read-only' }, { write: () => {}, close: () => {} })
+  const boundary = t.injected.find(b => Array.isArray(b.content) && String(b.content[0].text).indexOf('本次科灵角色') !== -1)
+  assert.ok(boundary, '应捕获 agent.inject 的边界消息')
+  const text = String(boundary.content[0].text)
+  mustFind(text, '早期对话要点（供理解上下文，非硬约束；无关项忽略）：', 'handoff 标题')
+  mustFind(text, '关键问题0', 'handoff 正文')
+  mustFind(text, '关键结论0', 'handoff 回答')
+})
+
+test('handoff 注入：无要点或空活跃会话不注入 handoff 段', async () => {
+  const messages = Array.from({ length: 31 }, (_, i) => ({ q: '短问' + i, a: '短答' + i }))
+  const t = handoffChatCtx(null)
+  await t.svc.store.mutate('seed no-handoff', draft => {
+    draft.activeChatId = 'c_plain'
+    draft.chats = [{ id: 'c_plain', title: '普通会话', messages }]
+  })
+  await t.svc.chatStream({ question: '你好', perm: 'read-only' }, { write: () => {}, close: () => {} })
+  const boundary = t.injected.find(b => Array.isArray(b.content) && String(b.content[0].text).indexOf('本次科灵角色') !== -1)
+  assert.ok(boundary, '应捕获 agent.inject 的边界消息')
+  assert.equal(String(boundary.content[0].text).indexOf('早期对话要点（供理解上下文'), -1, '无 handoff 不得注入标题')
+})
+
+test('handoff 注入：超长 handoff 被字符上限截断', async () => {
+  const huge = '甲'.repeat(700)
+  const t = handoffChatCtx(null)
+  await t.svc.store.mutate('seed huge-handoff', draft => {
+    draft.activeChatId = 'c_huge'
+    draft.chats = [{ id: 'c_huge', title: '长要点会话', messages: [], handoff: huge }]
+  })
+  await t.svc.chatStream({ question: '你好', perm: 'read-only' }, { write: () => {}, close: () => {} })
+  const boundary = t.injected.find(b => Array.isArray(b.content) && String(b.content[0].text).indexOf('本次科灵角色') !== -1)
+  assert.ok(boundary, '应捕获 agent.inject 的边界消息')
+  const text = String(boundary.content[0].text)
+  const at = mustFind(text, '早期对话要点（供理解上下文，非硬约束；无关项忽略）：', 'handoff 标题')
+  const tail = text.slice(at)
+  assert.ok(tail.indexOf('甲'.repeat(601)) === -1, '注入体不得超过 600 字符上限')
+  assert.ok(tail.indexOf('…') !== -1, '截断应带省略号')
+})
+
+test('chat_search：命中 query 的会话返回 snippet，既有字段保持', async () => {
+  const { svc } = freshService({
+    activeChatId: 'c_find',
+    chats: [{ id: 'c_find', title: '光子晶体', summary: '', tags: [], outcomes: [], messages: [{ q: '光子晶体的带隙如何计算', a: '用传输矩阵法计算带隙' }] }],
+  })
+  const out = await svc.run({ action: 'chat_search', query: '带隙' })
+  assert.equal(out.ok, true)
+  assert.equal(out.results.length, 1)
+  const hit = out.results[0]
+  assert.equal(hit.id, 'c_find')
+  assert.equal(hit.title, '光子晶体')
+  assert.equal(hit.matchCount > 0, true)
+  assert.ok(Array.isArray(hit.tags) && Array.isArray(hit.outcomes))
+  assert.ok(typeof hit.updatedAt !== 'undefined')
+  mustFind(hit.snippet, '带隙', 'snippet 含命中词')
+})
+
+test('chat_search：未命中 query 的会话不进结果，snippet 字段不出现', async () => {
+  const { svc } = freshService({
+    activeChatId: 'c_none',
+    chats: [{ id: 'c_none', title: '无关会话', messages: [{ q: '天气如何', a: '晴' }] }],
+  })
+  const out = await svc.run({ action: 'chat_search', query: '量子纠缠' })
+  assert.equal(out.ok, true)
+  assert.equal(out.results.length, 0, '未命中不得进结果')
+})

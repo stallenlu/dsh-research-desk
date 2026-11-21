@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { cleanText, parseJsonLoose, isHttpUrl, toNumber } from '../lib/util.mjs'
-import { applyOps, emptyState, migrateState, paperKey } from '../lib/desk.mjs'
+import { applyOps, emptyState, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD } from '../lib/desk.mjs'
 import { Store, revertChange } from '../lib/store.mjs'
 import { chunkText, retrieve, tokenize, ask } from '../lib/qa.mjs'
 
@@ -319,4 +319,55 @@ test('desk: invalid collab status is coerced away and falls back to active', () 
   applyOps(state, [{ op: 'add_collab', title: '非法状态测试', status: 'nonsense' }])
   assert.equal(state.collaborations.length, 1)
   assert.equal(state.collaborations[0].status, 'active')
+})
+
+// ── 检查点内核：早期对话 handoff（纯函数） ────────────────────────────────
+// 常量必须保持可断言的确定值，防手滑改阈值/上限后历史会话静默丢失要点。
+test('desk: handoff 常量取值为 30 条阈值与 600 字封顶', () => {
+  assert.equal(HANDOFF_MESSAGE_THRESHOLD, 30)
+  assert.equal(HANDOFF_CHAR_CAP, 600)
+})
+
+test('desk: buildChatHandoff 短会话与未超阈值不生成，超阈值才压出早期要点', () => {
+  const msg = i => ({ q: '问题' + i, a: '回答' + i })
+  assert.equal(buildChatHandoff([]), '', '空数组无要点')
+  assert.equal(buildChatHandoff(Array.from({ length: HANDOFF_MESSAGE_THRESHOLD }, (_, i) => msg(i))), '', '恰好等于阈值不生成')
+  const over = Array.from({ length: HANDOFF_MESSAGE_THRESHOLD + 3 }, (_, i) => msg(i))
+  const h = buildChatHandoff(over)
+  assert.ok(h.length > 0, '超阈值生成非空要点')
+  assert.ok(h.indexOf('问：问题0') !== -1, '含最早一条问')
+  assert.ok(h.indexOf('答：回答0') !== -1, '含最早一条答')
+  assert.ok(h.indexOf('问题' + (HANDOFF_MESSAGE_THRESHOLD + 2)) === -1, '不取被 slice(-200) 挤掉之后的新增消息')
+})
+
+test('desk: buildChatHandoff 纯函数确定性，且总长不超 HANDOFF_CHAR_CAP', () => {
+  const messages = Array.from({ length: 40 }, (_, i) => ({ q: '研究问题' + i + '：' + '甲'.repeat(20), a: '结论' + i + '：' + '乙'.repeat(30) }))
+  const a = buildChatHandoff(messages)
+  const b = buildChatHandoff(messages)
+  assert.equal(a, b, '同输入必须同输出')
+  assert.ok(a.length > 0)
+  assert.ok(a.length <= HANDOFF_CHAR_CAP, 'handoff 总长必须封顶')
+})
+
+test('desk: enrichChat 现算 handoff，短会话不写、长会话写入', () => {
+  const short = { messages: Array.from({ length: 5 }, (_, i) => ({ q: '短问' + i, a: '短答' + i })) }
+  enrichChat(short)
+  assert.equal(short.handoff, '', '短会话 handoff 为空串')
+  const long = { messages: Array.from({ length: HANDOFF_MESSAGE_THRESHOLD + 2 }, (_, i) => ({ q: '长问' + i, a: '长答' + i })) }
+  enrichChat(long)
+  assert.ok(long.handoff.length > 0)
+  assert.ok(long.handoff.indexOf('问：长问0') !== -1)
+})
+
+test('desk: migrateState 白名单保留 handoff，chats[] 仍是单一真相源', () => {
+  const messages = Array.from({ length: HANDOFF_MESSAGE_THRESHOLD + 2 }, (_, i) => ({ q: '白名单问' + i, a: '白名单答' + i }))
+  const handoff = buildChatHandoff(messages)
+  const state = migrateState({
+    activeChatId: 'c_handoff',
+    chats: [{ id: 'c_handoff', title: '白名单会话', messages, handoff }],
+  })
+  assert.equal(state.chats.length, 1)
+  assert.equal(state.activeChatId, 'c_handoff')
+  assert.equal(state.chats[0].handoff, handoff, 'handoff 必须过 schema 白名单保留')
+  assert.equal(state.chats[0].outcomes.length >= 0, true, 'outcomes 四枚举字段仍存在')
 })
