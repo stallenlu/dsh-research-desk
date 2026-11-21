@@ -1916,3 +1916,14 @@ test('记忆注入：已否决的画像偏好以勿再提措辞回灌，位于�
   const declinedAt = mustFind(text, '已否决的画像偏好，勿再提：别再提这个', '勿再提措辞', boundaryAt)
   assert.ok(declinedAt > boundaryAt, '否决回灌必须排在画像边界之后')
 })
+
+test('记忆问答正例：据实说明长期画像，且不编造不存在的内部机制', () => {
+  const hostSource = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  // 正例句逐字在宿主源码里（mustFind 内部即 assert.ok(indexOf !== -1)）。
+  mustFind(hostSource, '会被记入长期画像，换会话仍可用', '记忆问答正例句')
+  // 越权/虚构措辞在宿主源码里零命中。
+  const forbidden = ['记忆视图', '未挂载', '记忆写入通道', '换会话不一定还在', '记忆服务恢复']
+  for (const phrase of forbidden) {
+    assert.ok(hostSource.indexOf(phrase) === -1, '宿主源码不得出现越权措辞：' + phrase)
+  }
+})
