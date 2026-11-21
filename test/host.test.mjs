@@ -1927,3 +1927,15 @@ test('记忆问答正例：据实说明长期画像，且不编造不存在的�
     assert.ok(hostSource.indexOf(phrase) === -1, '宿主源码不得出现越权措辞：' + phrase)
   }
 })
+
+test('记忆问答边界：约束句在宿主源码里，且宿主源码零提具体记忆产品名', () => {
+  const hostSource = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  // 新增约束句的两个关键子串逐字在宿主源码里（mustFind 内部即 assert.ok(indexOf !== -1)）。
+  mustFind(hostSource, '不要提及任何具体的记忆产品名或内部系统名', '不提记忆产品名/内部系统名')
+  mustFind(hostSource, '也不要展开当前会话的文件策略', '不展开文件策略')
+  // 宿主源码 Mnemon|mnemon 仍零命中。
+  const forbiddenNames = ['Mnemon', 'mnemon']
+  for (const name of forbiddenNames) {
+    assert.ok(hostSource.indexOf(name) === -1, '宿主源码不得出现记忆产品名：' + name)
+  }
+})
