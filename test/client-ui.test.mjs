@@ -973,3 +973,54 @@ test('image 页渲染订阅生图工具可用性小字，且提示诚实', () =>
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
   assert.ok(host.includes('imageToolAvailable: Boolean(draftImageTool(ctx))'), 'settingsView 必须暴露探测结果')
 })
+
+// ---- 关3：两个设置入口统一到单一面板渲染源（齿轮 → 科灵栏设置面板） ----
+test('齿轮入口重定向到科灵栏设置面板 root，并解除 dockOpen 硬约束', () => {
+  const gear = src.split('\n').find(l => l.includes("key: 'gear', icon: 'gear', label: '设置'"))
+  assert.ok(gear, '顶栏齿轮按钮缺失')
+  assert.ok(gear.includes('setDockOpen(true)'), '齿轮必须先打开科灵栏，解除 settingsPanel 的 dockOpen 硬约束')
+  assert.ok(gear.includes("setSettingsPage('root')"), '齿轮必须把面板复位到 root 页')
+  assert.ok(gear.includes('setSettingsPanelOpen(true)'), '齿轮必须显式打开设置面板')
+  assert.ok(gear.includes('setShowSettings') === false, '齿轮不得再指向已删除的 settingsDialog')
+})
+
+test('旧 settingsDialog 死代码源码级不存在（state/定义/挂载三处）', () => {
+  assert.ok(!src.includes('showSettings'), 'showSettings 状态残留')
+  assert.ok(!src.includes('setShowSettings'), 'setShowSettings 引用残留')
+  assert.ok(!src.includes('settingsDialog'), 'settingsDialog 定义或挂载残留')
+  assert.ok(!src.includes("key: 'setdlg'"), '旧设置对话框 key 残留')
+})
+
+test('other 子页存在并承接 30 项 settingRows 单一渲染', () => {
+  assert.ok(src.includes("settingsPage === 'other'"), 'other 子页分支缺失')
+  const at = src.indexOf("settingsPage === 'other'")
+  const page = src.slice(at, src.indexOf("key: 'effort'", at))
+  assert.ok(page.includes("...settingRows.filter(r => r.key !== 'model.route').map(renderField)"), 'other 页必须渲染 30 项设置')
+  assert.ok(page.includes('md-settings-body') && page.includes('md-settings-back'), 'other 页须复用既有面板样式与返回按钮')
+  assert.ok(page.includes('saveSettings') && page.includes('resetSettings'), 'other 页须保留保存设置/恢复默认')
+})
+
+test('root 页含「其他与界面偏好」入口行且复用 chevR 同构样式', () => {
+  const rootAt = src.indexOf("className: 'md-settings-body', key: 'root'")
+  const root = src.slice(rootAt, src.indexOf("settingsPage === 'model'", rootAt))
+  assert.ok(root.includes("key: 'other', className: 'md-settings-row'"), 'root 页缺少「其他与界面偏好」入口行')
+  assert.ok(root.includes('其他与界面偏好'), '入口行 label 缺失')
+  assert.ok(root.includes("setSettingsPage('other')"), '入口行必须跳到 other 页')
+  assert.ok(root.includes("I({ name: 'chevR', size: 14 })"), '入口行须复用 chevR 箭头')
+})
+
+test('四项界面偏好处理函数源码仍在，零功能倒退', () => {
+  for (const fn of ['setLocaleId', 'setBgStyle', 'setDockDefault', 'setScatterAnim']) {
+    assert.ok(src.includes(fn + '('), '界面偏好处理函数丢失：' + fn)
+  }
+  assert.ok(src.includes("localStorage.setItem('rd.dockDefault'"), '默认显示科灵的持久化逻辑丢失')
+  assert.ok(src.includes("role: 'radiogroup'") && src.includes("'aria-label': '语言'"), '语言 segment 语义丢失')
+})
+
+test('image.* 字段仅在 image 子页单一渲染，不再与 other 页重复', () => {
+  const renderLines = src.split('\n').filter(l => l.includes("settingRows.filter(r => r.key.indexOf('image.') === 0).map(renderField)"))
+  assert.equal(renderLines.length, 1, 'image.* 渲染必须只有一处')
+  const otherAt = src.indexOf("settingsPage === 'other'")
+  const other = src.slice(otherAt, src.indexOf("key: 'effort'", otherAt))
+  assert.ok(!other.includes("r.key.indexOf('image.')"), 'other 页不得重复渲染 image.* 字段')
+})
