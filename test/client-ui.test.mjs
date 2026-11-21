@@ -1311,32 +1311,63 @@ test('关3 菜单：外部点击 capture + Esc 关闭，触发按钮排除在外
   assert.ok(src.includes("className: 'md-ctool md-cmdmenu-trigger'"), 'cmd 触发按钮专属锚点 md-cmdmenu-trigger 缺失')
 })
 
-test('关3 对话直达最早/最新按钮：位置、dockRef 复用、onClick 落点与平滑滚动兜底', () => {
-  const headStart = mustFind(src, "h('h2', { key: 't' }, '科灵')")
-  const headEnd = mustFind(src, "label: '收起对话'", headStart)
-  const headBlock = src.slice(headStart, headEnd)
-  const firstLine = headBlock.split('\n').find(l => l.includes("label: '直达最早对话'"))
-  assert.ok(firstLine, '最早对话按钮须落在 h2 科灵 与 收起对话 之间')
-  assert.ok(firstLine.includes("key: 'first'"), '最早对话按钮 key 须为 first')
-  assert.ok(firstLine.includes("icon: 'send'"), '最早对话按钮须复用现成 send 图标（无 chevUp）')
-  assert.ok(firstLine.includes('size: 13'), '最早对话按钮 size 须为 13')
-  assert.ok(firstLine.includes('dockRef.current'), '最早对话按钮 onClick 须复用 dockRef')
-  assert.ok(firstLine.includes("el.scrollTo({ top: 0, behavior: 'smooth' })"), '最早对话须平滑滚到 top:0')
-  assert.ok(firstLine.includes('catch (e) { el.scrollTop = 0 }'), '最早对话须有 scrollTop=0 兜底')
-  assert.ok(!firstLine.includes('#'), '最早对话按钮行不得含 hex 色值')
+test('关3 对话直达最早/最新按钮：条件浮层、真实滚动落点、平滑兜底，无 hex', () => {
+  // 1) 状态机：passive scroll + rAF 节流，阈值 24，程序化滚动抑制回读。
+  const scrollStart = mustFind(src, '// 被动监听会话滚动条')
+  const scrollBlock = src.slice(scrollStart, mustFind(src, '}, [pointerInRail])', scrollStart))
+  assert.ok(scrollBlock.includes("addEventListener('scroll', onScroll, { passive: true })"), '须 passive 监听 scroll')
+  assert.ok(scrollBlock.includes('requestAnimationFrame(read)'), '须用 rAF 节流 scroll 回读')
+  assert.ok(scrollBlock.includes('scrollProgrammaticRef.current'), '程序化滚动须抑制回读')
+  assert.ok(scrollBlock.includes('el.scrollTop <= 24'), 'atTop 阈值须为 24')
+  assert.ok(scrollBlock.includes('el.scrollHeight - el.scrollTop - el.clientHeight <= 24'), 'atBottom 阈值须为 24')
+  assert.ok(scrollBlock.includes('setAtTop(top); setAtBottom(bottom)'), '两个布尔状态须同步更新')
 
+  // 2) 两个按钮锚在 md-dock-body（=消息内容框）内的绝对定位浮层，条件渲染（!atTop / !atBottom），不再在头部/工具条。
+  const firstLine = src.split('\n').find(l => l.includes("label: '直达最早对话'") && l.includes('F({'))
+  const lastLine = src.split('\n').find(l => l.includes("label: '直达最新对话'") && l.includes('F({'))
+  assert.ok(firstLine, '最早对话按钮须为 F(...) 浮层')
+  assert.ok(lastLine, '最新对话按钮须为 F(...) 浮层')
+  assert.ok(firstLine.includes('!atTop ?'), '最早按钮须 !atTop 条件显示')
+  assert.ok(lastLine.includes('!atBottom ?'), '最新按钮须 !atBottom 条件显示')
+  assert.ok(firstLine.includes("className: 'md-dock-jump md-dock-jump-up'"), '最早按钮须用浮层 class')
+  assert.ok(lastLine.includes("className: 'md-dock-jump md-dock-jump-down'"), '最新按钮须用浮层 class')
+  const bodyStart = mustFind(src, "h('div', { className: 'md-dock-body', key: 'dockbody' }, [")
+  const bodyEnd = mustFind(src, "h('form', { className: 'md-composer'", bodyStart)
+  const bodyBlock = src.slice(bodyStart, bodyEnd)
+  assert.ok(bodyBlock.includes("label: '直达最早对话'") && bodyBlock.includes("label: '直达最新对话'"), '两个按钮须锚在消息内容框包裹层 md-dock-body 内')
+  assert.ok(bodyBlock.includes("'md-dock-scroll', 'aria-live'"), '消息列表容器须与按钮同处 md-dock-body')
+  assert.ok(!bodyBlock.includes("className: 'md-composer'"), '按钮不得落在输入工具行')
+  const cssStart0 = mustFind(src, 'const DOCK_RESIZE_CSS')
+  const cssBlock0 = src.slice(cssStart0, src.indexOf("h('style', { key: 'dockcss' }", cssStart0))
+  assert.ok(cssBlock0.includes('.md-dock-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}'), '内容框包裹层须为相对定位 flex 列，且占据 md-dock 剩余高度')
+  assert.ok(firstLine.includes("icon: 'chevU'") && lastLine.includes("icon: 'chevD'"), '按钮图标须 chevU/chevD')
+  assert.ok(!firstLine.includes('#') && !lastLine.includes('#'), '按钮行不得含 hex 色值')
+  const headStart = mustFind(src, "h('div', { className: 'md-dock-head'")
+  const headEnd = mustFind(src, "label: '收起对话'", headStart)
+  assert.ok(!src.slice(headStart, headEnd).includes('直达最早对话'), '最早按钮不得留在 dock 头部')
   const clearIdx = mustFind(src, "title: '清空当前对话'")
   const cmdIdx = mustFind(src, 'cmdMenuOpen ? h(', clearIdx)
-  const toolBlock = src.slice(clearIdx, cmdIdx)
-  const lastLine = toolBlock.split('\n').find(l => l.includes("label: '直达最新对话'"))
-  assert.ok(lastLine, '最新对话按钮须落在 清空当前对话 与 cmdMenuOpen 之间')
-  assert.ok(lastLine.includes("key: 'last'"), '最新对话按钮 key 须为 last')
-  assert.ok(lastLine.includes("icon: 'chevD'"), '最新对话按钮须复用现成 chevD 图标')
-  assert.ok(lastLine.includes('size: 13'), '最新对话按钮 size 须为 13')
-  assert.ok(lastLine.includes('dockRef.current'), '最新对话按钮 onClick 须复用 dockRef')
-  assert.ok(lastLine.includes("el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })"), '最新对话须平滑滚到 scrollHeight')
-  assert.ok(lastLine.includes('catch (e) { el.scrollTop = el.scrollHeight }'), '最新对话须有 scrollTop=scrollHeight 兜底')
-  assert.ok(!lastLine.includes('#'), '最新对话按钮行不得含 hex 色值')
+  assert.ok(!src.slice(clearIdx, cmdIdx).includes('直达最新对话'), '最新按钮不得留在工具条')
+
+  // 3) 跳转函数：真实写 scrollTop / scrollTo，带兜底，无注释冒充证据。
+  const topStart = mustFind(src, 'const jumpToTop = () => {')
+  const topBody = src.slice(topStart, mustFind(src, 'const jumpToBottom', topStart))
+  assert.ok(topBody.includes("el.scrollTo({ top: 0, behavior: 'smooth' })"), '最早跳转须平滑滚到 top:0')
+  assert.ok(topBody.includes('catch (e) { el.scrollTop = 0 }'), '最早跳转须有 scrollTop=0 兜底')
+  const botStart = mustFind(src, 'const jumpToBottom = () => {')
+  const botBody = src.slice(botStart, mustFind(src, 'const jumpToTurn', botStart))
+  assert.ok(botBody.includes("el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })"), '最新跳转须平滑滚到 scrollHeight')
+  assert.ok(botBody.includes('catch (e) { el.scrollTop = el.scrollHeight }'), '最新跳转须有 scrollTop=scrollHeight 兜底')
+  assert.ok(firstLine.includes('onClick: jumpToTop') && lastLine.includes('onClick: jumpToBottom'), '按钮须绑定真实跳转函数')
+  assert.ok(!topBody.includes('#') && !botBody.includes('#'), '跳转函数不得含 hex 色值')
+
+  // 4) chevU 图标字典存在，浮层 CSS 绝对定位且不上头部/工具条。
+  assert.ok(src.includes("chevU:'M6 14.5l6-6 6 6',"), 'ICONS 须新增 chevU 路径')
+  assert.ok(src.includes('.md-dock-jump{position:absolute'), '浮层按钮 CSS 须绝对定位')
+  assert.ok(src.includes('.md-dock-jump-up{top:12px}') && src.includes('.md-dock-jump-down{bottom:12px}'), '上下浮层须贴内容框右上/右下（12px）')
+  assert.ok(src.includes('.md-dock-jump{position:absolute;right:14px;z-index:8'), '浮层须 right 定位且不遮挡交互')
+  assert.ok(src.includes('width:34px;height:34px;border:0;border-radius:100px;background:var(--dsw-alias-button-floating-fill);box-shadow:var(--dsw-elevation-panel)'), '按钮须照 DSH 原生圆形浮层视觉（34px/圆角/浮层 token）')
+  assert.ok(!/\.md-dock-jump-down\{bottom:88px/.test(src), '不得回退到贴输入行的 bottom:88px 锚点')
 
   const refLines = src.split('\n').filter(l => l.includes('ref: dockRef') && l.includes("'md-dock-scroll'"))
   assert.equal(refLines.length, 1, '仅主会话 md-dock-scroll 绑 dockRef；成稿 studio 不绑')
@@ -1358,4 +1389,92 @@ test('关3 对话滚动条细化：仅 .md-dock-scroll 用语义 token，无自�
   const studioStart = mustFind(src, '.md-studio .md-dock-scroll {')
   const studioRule = src.slice(studioStart, src.indexOf('}', studioStart))
   assert.ok(!studioRule.includes('scrollbar-width'), '成稿 studio 滚动容器不在本次改动范围')
+})
+test('关3 对话轮次标尺：结构/真实跳转/active 跟随/hover 暂停/窄屏隐藏（对齐 DSH）', () => {
+  // 结构：标尺是 md-dock 内兄弟浮层，不在 md-dock-scroll 里；一条消息一个 mark。
+  const railStart = mustFind(src, "msgs.length > 1 ? h('div', { className: 'md-turnrail'")
+  const railBlock = src.slice(railStart, mustFind(src, "'md-dock-scroll', 'aria-live'", railStart))
+  assert.ok(!railBlock.includes("'md-dock-scroll'"), '标尺须是 md-dock-scroll 的兄弟层，不得嵌在滚动体内')
+  assert.ok(railBlock.includes("msgs.length > 1 ?"), '少于 2 条消息不渲染标尺')
+  assert.ok(railBlock.includes("className: 'md-turnrail'"), '标尺 class 须 md-turnrail')
+  assert.ok(railBlock.includes("'aria-label': '对话轮次标尺'"), '标尺须有无障碍标签')
+  assert.ok(railBlock.includes("msgs.map((m, i) =>"), '一条消息须映射一个刻度')
+  assert.ok(railBlock.includes("className: 'md-turnrail-mark' + (activeTurn === i ? ' md-turnrail-mark-active' : '')"), 'active 刻度须用 md-turnrail-mark-active')
+  assert.ok(railBlock.includes("style: { top: (i * 10 + 6) + 'px' }"), '刻度 top 须 i*10+6（首尾各留 6px，对齐 DSH RAIL_INSET_PX）')
+  assert.ok(railBlock.includes("onClick: () => jumpToTurn(i)"), '刻度点击须触发 jumpToTurn')
+  assert.ok(railBlock.includes("title: (m.role === 'me' ? '我：' : '科灵：') + String(m.text || '').slice(0, 40)"), '刻度须保留轻量预览 title，不做浮层 tooltip')
+  assert.ok(railBlock.includes('onPointerEnter: () => setPointerInRail(true)') && railBlock.includes('onPointerLeave: () => setPointerInRail(false)'), 'hover 标尺须暂停自动跟随')
+  assert.ok(!railBlock.includes('#'), '标尺渲染块不得含 hex 色值')
+
+  // 点击落点：jumpToTurn 真实 scrollTo/clamp，不靠 scrollIntoView。
+  const turnStart = mustFind(src, 'const jumpToTurn = i => {')
+  const turnBody = src.slice(turnStart, turnStart + 650)
+  assert.ok(turnBody.includes("el.scrollTo({ top: goal, behavior: 'smooth' })"), '刻度跳转须平滑滚到计算值')
+  assert.ok(turnBody.includes('catch (e) { el.scrollTop = goal }'), '刻度跳转须有 scrollTop 兜底')
+  assert.ok(turnBody.includes('Math.max(0, Math.min(target.offsetTop - 24, el.scrollHeight - el.clientHeight))'), '跳转目标须 clamp 在 [0, 最大滚动]')
+  assert.ok(!turnBody.includes('scrollIntoView'), '刻度跳转不得用 scrollIntoView')
+  assert.ok(!turnBody.includes('#'), '跳转函数不得含 hex 色值')
+
+  // activeIndex 跟随：scroll 回读里计算最近行中心；指针在标尺内时暂停。
+  const scrollStart = mustFind(src, '// 被动监听会话滚动条')
+  const scrollBlock = src.slice(scrollStart, mustFind(src, '}, [pointerInRail])', scrollStart))
+  assert.ok(scrollBlock.includes("el.querySelectorAll('[data-rd-msg=\"1\"]')"), '须按消息行计算可见轮次')
+  assert.ok(scrollBlock.includes('rows[i].offsetTop + rows[i].offsetHeight / 2'), '须按行中心判断 active')
+  assert.ok(scrollBlock.includes('if (!pointerInRail) setActiveTurn(best)'), 'hover 标尺时须暂停 active 跟随')
+})
+
+test('关3 对话轮次标尺：渐隐两状态 class + black 渐变，active 限高后 if-needed 居中且 pointer 暂停', () => {
+  // 状态位：两端滚动状态由标尺 scroller 的 onScroll 回读。
+  const stateStart = mustFind(src, 'const [railAtStart, setRailAtStart] = useState(true)')
+  const stateBlock = src.slice(stateStart, stateStart + 300)
+  assert.ok(stateBlock.includes('const [railAtEnd, setRailAtEnd] = useState(true)'), '须有 railAtEnd 渐隐状态位')
+
+  const railStart = mustFind(src, "msgs.length > 1 ? h('div', { className: 'md-turnrail'")
+  const railBlock = src.slice(railStart, mustFind(src, "'md-dock-scroll', 'aria-live'", railStart))
+  assert.ok(railBlock.includes("className: 'md-turnrail-scroll' + (railAtStart ? '' : ' md-turnrail-fade-top') + (railAtEnd ? '' : ' md-turnrail-fade-bottom')"), '顶部/底部可滚时须分别挂 fade-top/fade-bottom class')
+  assert.ok(railBlock.includes("(railAtEnd ? '' : ' md-turnrail-fade-bottom')"), '底部可滚时须挂 fade-bottom class')
+  assert.ok(railBlock.includes('onScroll: e => { const el = e.currentTarget; setRailAtStart(el.scrollTop <= 1); setRailAtEnd(el.scrollTop >= el.scrollHeight - el.clientHeight - 1) }'), 'onScroll 须按 1px 阈值回读两端渐隐状态')
+
+  // active 居中：仅在刻度越出 fade-free 带时才写 scrollTop；pointer 在标尺内暂停。
+  const centerStart = mustFind(src, '// 限高后 active 刻度可能落在可视带外')
+  const centerBlock = src.slice(centerStart, mustFind(src, '}, [activeTurn, msgs.length, pointerInRail])', centerStart))
+  assert.ok(centerBlock.includes('useEffect('), 'active 居中须为 effect')
+  assert.ok(centerBlock.includes('if (!el || pointerInRail || msgs.length < 2) return'), '指针在标尺内或消息不足时须暂停居中')
+  assert.ok(centerBlock.includes('const top = activeTurn * 10 + 6'), '居中定位须用 i*10+6 的刻度坐标')
+  assert.ok(centerBlock.includes('if (top >= el.scrollTop + 24 && top + 10 <= el.scrollTop + el.clientHeight - 24) return'), 'if-needed：刻度在 fade-free 带内不滚')
+  assert.ok(centerBlock.includes('el.scrollTop = Math.max(0, Math.min(top - el.clientHeight / 2, max))'), '居中目标须 clamp 到 [0, max]')
+  assert.ok(centerBlock.includes('const max = Math.max(0, el.scrollHeight - el.clientHeight)'), '居中滚动上限须按 scrollHeight-clientHeight')
+})
+
+test('关3 对话轮次标尺 CSS：限高居中/right12/默认短杠0.6/active满格、fade 双写 black、零 hex', () => {
+  const cssStart = mustFind(src, 'const DOCK_RESIZE_CSS')
+  const cssBlock = src.slice(cssStart, src.indexOf("h('style', { key: 'dockcss' }", cssStart))
+  for (const cls of ['.md-turnrail{', '.md-turnrail-scroll{', '.md-turnrail-fade-top{', '.md-turnrail-fade-bottom{', '.md-turnrail-mark{', '.md-turnrail-mark::before{', '.md-turnrail-mark-active::before{'])
+    assert.ok(cssBlock.includes(cls), '标尺 CSS 缺少 ' + cls)
+  // frame：相对 md-dock-body 居中 + 限高 + right 12（对齐 DSH）。
+  assert.ok(cssBlock.includes('.md-turnrail{position:absolute;top:50%;right:12px;width:28px;max-height:min(calc(100% - 64px),420px);transform:translateY(-50%)'), '标尺须 top50% 居中、max-height 限高、right12px')
+  // scroller：relative + inherit 继承限高 + overscroll 隔离。
+  assert.ok(cssBlock.includes('.md-turnrail-scroll{position:relative;max-height:inherit;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}'), 'scroller 须 relative+inherit+overscroll-behavior:contain')
+  // mark：透明底，只有 ::before 是横杠；默认短 0.6 靠右，active 才满格 1 换主色。
+  assert.ok(cssBlock.includes('border-radius:8px;background:transparent;cursor:pointer'), 'mark 本体须透明底，横杠只在 ::before')
+  assert.ok(cssBlock.includes('width:20px;height:2px;border-radius:2px;background:var(--dsw-alias-border-l4)'), '横杠须 20×2、复用 --dsw-alias-border-l4')
+  assert.ok(cssBlock.includes('transform:translateY(-50%) scaleX(0.6);transform-origin:right center'), '默认刻度须 scaleX(0.6) 靠右，transform-origin:right center')
+  assert.ok(cssBlock.includes('.md-turnrail-mark-active::before{transform:translateY(-50%) scaleX(1);background:var(--dsw-alias-label-primary)}'), 'active 刻度须 scaleX(1) 满格、换 --dsw-alias-label-primary')
+  assert.ok(!cssBlock.includes('scaleX(1.25)'), '不得回退到旧 active 变长 scaleX(1.25)')
+  // fade：三段 mask，双写 -webkit，关键字 black（零 hex）。
+  assert.ok(cssBlock.includes('-webkit-mask-image:linear-gradient(to bottom,transparent 0,black 24px,black 100%);mask-image:linear-gradient(to bottom,transparent 0,black 24px,black 100%)'), 'fade-top 须黑关键字渐变、双写 mask')
+  assert.ok(cssBlock.includes('-webkit-mask-image:linear-gradient(to bottom,black 0,black calc(100% - 24px),transparent 100%);mask-image:linear-gradient(to bottom,black 0,black calc(100% - 24px),transparent 100%)'), 'fade-bottom 须黑关键字渐变、双写 mask')
+  assert.ok(cssBlock.includes('-webkit-mask-image:linear-gradient(to bottom,transparent 0,black 24px,black calc(100% - 24px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,black 24px,black calc(100% - 24px),transparent 100%)'), '两端 fade 合成须黑关键字渐变、双写 mask')
+  const zeroHex = '#' + '000'
+  assert.ok(!cssBlock.includes(zeroHex), 'mask 渐变不得用十六进制黑，须用 black 关键字')
+  // 窄屏：保留 md-root 560px（有意差异，非 DSH 的 900px）。
+  assert.ok(cssBlock.includes('@container md-root (max-width:560px){.md-turnrail{display:none}}'), '窄屏须在 560px 隐藏标尺（不照搬 DSH 900px）')
+  const addedCss = cssBlock.slice(mustFind(src, '.md-dock-jump{position:absolute', cssStart))
+  assert.ok(!addedCss.includes('#'), '新增 CSS 不得含 hex 色值')
+})
+
+test('关3 对话轮次标尺：旧侧边刻度命名负向控制仍为零', () => {
+  const banned = ['md-dock-scroll-rail', 'md-dock-rail', 'md-dock-scroll-tick', 'scrollbar-tick', 'md-scroll-ticks', 'dock-scale']
+    .filter(k => src.includes(k))
+  assert.deepEqual(banned, [], '不得复用被禁止的侧边刻度命名: ' + banned.join(','))
 })
