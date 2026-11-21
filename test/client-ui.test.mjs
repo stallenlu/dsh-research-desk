@@ -584,7 +584,7 @@ test('装饰开关诚实化：识图已接入、协作已接入，权限标当�
   assert.ok(src.includes("className: 'md-ctool md-ctool-vision' + (images.length") && !src.includes('识图·未接入'), 'vision button must be enabled and no longer labeled 未接入')
   assert.ok(src.includes('让科灵看这张图') && src.includes('选图片给科灵看'), 'vision tooltip must explain how to use real image recognition')
   assert.ok(src.includes('智能体团队协作') && src.includes('已接入'), 'teamCollab must be shown as connected (real capability)')
-  assert.ok(src.includes('md-settings-tip') && src.includes('靶心按钮'), 'teamCollab tip must point to the target button')
+  assert.ok(src.includes('md-settings-tip') && src.includes('交给科灵 · 到虚空验证'), 'target-button wording survives in the askcollab button title')
   assert.ok(src.includes("' · 当前只读'"), 'perm row must show it currently runs read-only')
   assert.ok(src.includes('不会立刻提权'), 'perm tip must say selecting a higher tier does not escalate')
   assert.ok(src.includes('高风险动作（装包、发包等）仍需在决策区拍板'), 'perm copy must scope high-risk to decision zone')
@@ -1106,4 +1106,40 @@ test('齿轮改造新增片段零新增硬编码 hex', () => {
     src.split('\n').find(l => l.includes("key: 'gear', icon: 'gear', label: '设置'")) || '',
   ].join('\n')
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(regions), '本次新增片段不得引入硬编码 hex')
+})
+
+// ---- 设置根页瘦身（用户投诉：模型/推理等级/权限/智能团队不该堆在设置首屏）----
+test('设置根页只保留生图配置与其他与界面偏好两个入口，模型相关与智能团队入口已移出', () => {
+  const rootAt = src.indexOf("className: 'md-settings-body', key: 'root'")
+  assert.ok(rootAt > 0, 'root 设置页缺失')
+  const root = src.slice(rootAt, src.indexOf("settingsPage === 'model'", rootAt))
+  for (const k of ['model', 'effort', 'perm', 'team', 'teamtip']) {
+    assert.ok(!root.includes("key: '" + k + "'"), 'root 页不得再出现 key:' + k + ' 入口')
+  }
+  assert.ok(root.includes("key: 'image', className: 'md-settings-row'"), 'root 页须保留生图配置入口')
+  assert.ok(root.includes("key: 'other', className: 'md-settings-row'"), 'root 页须保留其他与界面偏好入口')
+})
+
+test('推理等级入口下沉到 model 子页，返回回到 model 而非 root', () => {
+  const modelAt = src.indexOf("className: 'md-settings-body', key: 'model'")
+  assert.ok(modelAt > 0, 'model 设置子页缺失')
+  const model = src.slice(modelAt, src.indexOf("settingsPage === 'perm'", modelAt))
+  const mLines = model.split('\n')
+  const effortIdx = mLines.findIndex(l => l.includes("key: 'effort', className: 'md-settings-row'"))
+  assert.ok(effortIdx >= 0, 'model 子页缺少推理等级入口行')
+  const effortRow = mLines.slice(effortIdx, effortIdx + 3).join('\n')
+  assert.ok(effortRow.includes("onClick: () => setSettingsPage('effort')"), '入口须跳 effort 子页')
+  assert.ok(/I\(\{\s*name: 'chevR', size: 14\s*\}\)/.test(effortRow), '入口须复用 chevR 箭头')
+  const effortAt = src.indexOf("className: 'md-settings-body', key: 'effort'")
+  const effort = src.slice(effortAt, effortAt + 600)
+  assert.ok(effort.includes("key: 'back', className: 'md-settings-row md-settings-back', onClick: () => setSettingsPage('model')"), '推理等级返回须回到 model 子页')
+})
+
+test('科灵栏三入口 onClick 未被瘦身改动（盾牌进权限 / 模型胶囊直达 / 靶心开协作）', () => {
+  const perm = src.split('\n').find(l => l.includes("key: 'permind'"))
+  assert.ok(perm.includes("onClick: () => { setSettingsPage('perm'); setSettingsPanelOpen(v => !v) }"), '盾牌 onClick 被改动')
+  const model = src.split('\n').find(l => l.includes("className: 'md-ctool md-ctool-model md-settings-trigger'"))
+  assert.ok(model.includes("onClick: () => { setSettingsPage('model'); loadModels(); setSettingsPanelOpen(v => !v) }"), '模型胶囊 onClick 被改动')
+  const ask = src.split('\n').find(l => l.includes("key: 'askcollab'"))
+  assert.ok(ask && /onClick:\s*function\s*\(\)\s*\{\s*openCollabWithGoal\(input\)\s*\}/.test(ask), '靶心 onClick 被改动')
 })
