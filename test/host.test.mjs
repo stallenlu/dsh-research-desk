@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { apply, createService } from '../lib/host.mjs'
+import { apply, createService, explain, imageExtension, imageUrlCandidates } from '../lib/host.mjs'
 import { SETTING_DEFS } from '../lib/settings.mjs'
 import { canProceed } from '../lib/approval.mjs'
 
@@ -1348,7 +1348,7 @@ test('draft_image：HTTP 鉴权失败返回明确中文错误，不泄漏密钥'
   await withImageKey(() => withFetchStub(stub, async () => {
     const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
     assert.equal(res.ok, false)
-    assert.match(res.message, /鉴权失败/)
+    assert.match(res.message, /密钥无效|鉴权失败/)
     assert.ok(!res.message.includes(IMAGE_KEY_VALUE), '错误文案不得回显密钥')
   }))
 })
@@ -1402,4 +1402,192 @@ test('draft_image：HTTP 已配置但无真人批准记录不得调用接口', a
     assert.equal(res.message, '没有找到对应的人工批准记录，不能调用订阅生图额度。')
     assert.equal(fetched, 0, '无真人批准不得烧 HTTP 额度')
   }))
+})
+
+
+// ── 与媒体台对齐的生图健壮性：URL 候选、魔数、错误分类、三协议、抖动重试 ────────
+test('imageExtension：按魔数认图，后缀骗不了人', () => {
+  assert.equal(imageExtension(PNG_BYTES), 'png')
+  assert.equal(imageExtension(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16])), 'jpg')
+  assert.equal(imageExtension(Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])), 'gif')
+  assert.equal(imageExtension(Buffer.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])), 'webp')
+  assert.equal(imageExtension(Buffer.from('not an image at all')), null)
+  assert.equal(imageExtension(null), null)
+})
+
+test('imageUrlCandidates：绝对地址、协议相对、挂载前缀与站点根都覆盖', () => {
+  assert.deepEqual(imageUrlCandidates('https://cdn.example.test/a.png', 'https://api.example.test/v1'), ['https://cdn.example.test/a.png'])
+  assert.deepEqual(imageUrlCandidates('//cdn.example.test/a.png', 'https://api.example.test/v1'), ['https://cdn.example.test/a.png'])
+  const mount = imageUrlCandidates('/img/a.png', 'https://gateway.test/dsh/v1')
+  assert.ok(mount.includes('https://gateway.test/dsh/img/a.png'))
+  assert.ok(mount.includes('https://gateway.test/img/a.png'))
+  const nested = imageUrlCandidates('/v1/images/a.png', 'https://gateway.test/v1')
+  assert.ok(nested.includes('https://gateway.test/images/a.png'))
+  assert.ok(imageUrlCandidates('a.png', 'https://gateway.test/v1').includes('https://gateway.test/v1/a.png'))
+  assert.deepEqual(imageUrlCandidates('', 'https://gateway.test/v1'), [])
+})
+
+test('explain：常见状态码有中文解释，其他状态带截断详情', () => {
+  assert.match(explain(401), /密钥无效/)
+  assert.match(explain(403), /权限/)
+  assert.match(explain(404), /接口地址或模型不对/)
+  assert.match(explain(429), /额度不足/)
+  assert.match(explain(500, 'oops'), /500.*oops/)
+  assert.ok(explain(500, 'x'.repeat(1000)).length < 400)
+})
+
+function urlOf(input) {
+  return typeof input === 'string' ? input : (input && input.url) ? input.url : String(input)
+}
+function pngArrayBuffer() {
+  return PNG_BYTES.buffer.slice(PNG_BYTES.byteOffset, PNG_BYTES.byteOffset + PNG_BYTES.byteLength)
+}
+
+test('draft_image：下载同源图片带密钥，异源公网图片不带密钥', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const calls = []
+  const stub = async (url, opts) => {
+    calls.push({ url: urlOf(url), opts })
+    if (urlOf(url).includes('/images/generations')) {
+      return okJson({ data: [{ url: 'https://api.example.test/v1/out.png' }] })()
+    }
+    return { ok: true, status: 200, arrayBuffer: async () => pngArrayBuffer() }
+  }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '同源下载'))
+    assert.equal(res.ok, true, res.message)
+    assert.equal(calls.length, 2)
+    assert.equal(calls[1].opts.headers.authorization, 'Bearer ' + IMAGE_KEY_VALUE)
+  }))
+})
+
+test('draft_image：异源图片地址做 SSRF 校验，本机地址绝不抓取', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const calls = []
+  const stub = async (url, opts) => {
+    const href = urlOf(url)
+    calls.push(href)
+    if (href.includes('/images/generations')) return okJson({ data: [{ url: 'http://127.0.0.1/steal.png' }] })()
+    throw new Error('不应抓取内网地址')
+  }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '内网地址'))
+    assert.equal(res.ok, false)
+    assert.match(res.message, /不能抓取内网地址|下载图片失败/)
+    assert.equal(calls.length, 1, '不得真的请求内网地址')
+  }))
+})
+
+test('draft_image：图片魔数不对直接拒绝，不落盘假图片', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const stub = async () => okJson({ data: [{ b64_json: Buffer.from('not-a-real-image').toString('base64') }] })()
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '假图'))
+    assert.equal(res.ok, false)
+    assert.match(res.message, /不是图片/)
+  }))
+})
+
+test('draft_image：404/429 给出明确中文提示，不回显密钥', async () => {
+  for (const status of [404, 429]) {
+    const fixture = await configureHttp(await makeApprovedFixture(null, true))
+    const stub = async () => ({ ok: false, status, text: async () => '{"error":{"message":"bad ' + IMAGE_KEY_VALUE + '"}}' })
+    await withImageKey(() => withFetchStub(stub, async () => {
+      const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+      assert.equal(res.ok, false)
+      assert.ok(/接口地址或模型不对|额度不足/.test(res.message), res.message)
+      assert.ok(!res.message.includes(IMAGE_KEY_VALUE))
+    }))
+  }
+})
+
+test('draft_image：5xx 抖动只重试一次，鉴权失败不重试', async () => {
+  let attempts = 0
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  const stub = async () => { attempts++; return { ok: false, status: 503, text: async () => 'busy' } }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+    assert.equal(res.ok, false)
+    assert.equal(attempts, 2, '5xx 重试一次')
+  }))
+  attempts = 0
+  const fixture2 = await configureHttp(await makeApprovedFixture(null, true))
+  const authStub = async () => { attempts++; return { ok: false, status: 401, text: async () => 'no' } }
+  await withImageKey(() => withFetchStub(authStub, async () => {
+    const res = await fixture2.svc.run(approvedArgs(fixture2.collabId, fixture2.decisionId, 'x'))
+    assert.equal(res.ok, false)
+    assert.equal(attempts, 1, '鉴权失败不重试')
+  }))
+})
+
+test('draft_image：quality/extra 透传，extra 同名覆盖默认字段', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  await fixture.svc.run({ action: 'settings', patch: { 'image.quality': 'hd', 'image.extra': '{"style":"vivid","n":2}' } })
+  const calls = []
+  const stub = async (url, opts) => { calls.push({ url: urlOf(url), opts }); return okJson({ data: [{ b64_json: PNG_BYTES.toString('base64') }] })() }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, 'x'))
+    assert.equal(res.ok, true, res.message)
+    const body = JSON.parse(calls[0].opts.body)
+    assert.equal(body.quality, 'hd')
+    assert.equal(body.style, 'vivid')
+    assert.equal(body.n, 2, 'extra 同名键覆盖默认 n:1')
+  }))
+})
+
+async function configureProtocol(protocol, extra = {}) {
+  const fixture = await makeApprovedFixture(null, true)
+  const patch = Object.assign({
+    'image.protocol': protocol,
+    'image.baseUrl': 'https://dashscope.example.test/api/v1',
+    'image.model': protocol === 'openai' ? 'gpt-image-1' : 'test-image-model',
+    'image.apiKeyRef': IMAGE_KEY_ENV,
+  }, extra)
+  const view = await fixture.svc.run({ action: 'settings', patch })
+  assert.equal(view.ok, true, view.message)
+  return fixture
+}
+
+test('draft_image：百炼协议走同步 generation 接口并解析 content[].image', async () => {
+  const fixture = await configureProtocol('bailian')
+  const calls = []
+  const stub = async (url, opts) => {
+    calls.push({ url: urlOf(url), opts })
+    if (opts.method === 'POST') {
+      return okJson({ output: { choices: [{ message: { content: [{ image: 'https://dashscope.example.test/api/v1/out.png' }] } }] } })()
+    }
+    return { ok: true, status: 200, arrayBuffer: async () => pngArrayBuffer() }
+  }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '百炼配图'))
+    assert.equal(res.ok, true, res.message)
+    assert.match(calls[0].url, /multimodal-generation\/generation$/)
+    const body = JSON.parse(calls[0].opts.body)
+    assert.equal(body.parameters.size, '1536*1024')
+  }))
+})
+
+test('draft_image：万相协议走异步任务状态机（提交→轮询→成功）', async () => {
+  const fixture = await configureProtocol('wan')
+  const calls = []
+  const stub = async (url, opts) => {
+    const href = urlOf(url)
+    calls.push({ href, opts })
+    if (opts.method === 'POST' && href.includes('image-synthesis')) return okJson({ output: { task_id: 'task-1' } })()
+    if (href.includes('/tasks/task-1')) return okJson({ output: { task_status: 'SUCCEEDED', results: [{ url: 'https://dashscope.example.test/api/v1/out.png' }] } })()
+    return { ok: true, status: 200, arrayBuffer: async () => pngArrayBuffer() }
+  }
+  const previous = process.env.RD_IMAGE_POLL_MS
+  process.env.RD_IMAGE_POLL_MS = '1'
+  try {
+    await withImageKey(() => withFetchStub(stub, async () => {
+      const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '万相配图'))
+      assert.equal(res.ok, true, res.message)
+      assert.ok(calls.some(c => c.href.includes('image-synthesis')))
+      assert.ok(calls.some(c => c.href.includes('/tasks/task-1')))
+    }))
+  } finally {
+    if (previous === undefined) delete process.env.RD_IMAGE_POLL_MS
+    else process.env.RD_IMAGE_POLL_MS = previous
+  }
 })

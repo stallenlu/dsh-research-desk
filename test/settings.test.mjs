@@ -6,6 +6,7 @@ import {
   coerceSettings,
   defaultSettings,
   describeSettings,
+  normalizeImageBaseUrl,
   readSettings,
   resetSettings,
   resolveSecret,
@@ -110,6 +111,38 @@ test('image settings coerce: size default, apiKeyRef env-name only', () => {
   assert.equal(good.values['image.apiKeyRef'], 'RD_IMAGE_KEY')
   const badRef = coerceSettings({ 'image.apiKeyRef': 'not a name!' }, current)
   assert.equal(badRef.errors.length, 1)
+})
+
+
+test('生图协议枚举只收三选一，默认 openai', () => {
+  const current = defaultSettings()
+  assert.equal(current['image.protocol'], 'openai')
+  assert.equal(coerceSettings({ 'image.protocol': 'bailian' }, current).values['image.protocol'], 'bailian')
+  const bad = coerceSettings({ 'image.protocol': 'other' }, current)
+  assert.equal(bad.errors.length, 1)
+  assert.equal(bad.values['image.protocol'], 'openai')
+})
+
+test('生图地址按协议归一化且只收 http(s)', () => {
+  assert.deepEqual(normalizeImageBaseUrl('https://api.example.test/v1/images/generations/', 'openai'), { value: 'https://api.example.test/v1' })
+  assert.deepEqual(normalizeImageBaseUrl('https://dash.test/api/v1/services/aigc/multimodal-generation/generation', 'bailian'), { value: 'https://dash.test' })
+  assert.deepEqual(normalizeImageBaseUrl('https://dash.test/api/v1/tasks/123', 'wan'), { value: 'https://dash.test' })
+  assert.match(normalizeImageBaseUrl('ftp://example.test', 'openai').error, /http/)
+  const current = defaultSettings()
+  const bad = coerceSettings({ 'image.baseUrl': 'ftp://example.test' }, current)
+  assert.equal(bad.errors.length, 1)
+})
+
+test('生图附加参数只收 JSON 对象，quality 走普通字符串', () => {
+  const current = defaultSettings()
+  const good = coerceSettings({ 'image.extra': '{"style":"vivid"}', 'image.quality': 'hd' }, current)
+  assert.equal(good.errors.length, 0)
+  assert.equal(good.values['image.extra'], '{"style":"vivid"}')
+  assert.equal(good.values['image.quality'], 'hd')
+  for (const value of ['not json', '[1,2]', 'null']) {
+    const bad = coerceSettings({ 'image.extra': value }, current)
+    assert.equal(bad.errors.length, 1)
+  }
 })
 
 test('image.apiKeyRef secret never leaks its environment value in exports', () => {
