@@ -161,3 +161,23 @@ test('image.apiKeyRef secret never leaks its environment value in exports', () =
   if (previous === undefined) delete process.env.RD_TEST_IMAGE_KEY
   else process.env.RD_TEST_IMAGE_KEY = previous
 })
+
+test('image.source 默认值为自动，coerce 接受三档并拒绝未知值', () => {
+  const def = SETTING_DEFS.find(row => row.key === 'image.source')
+  assert.ok(def, 'image.source 定义必须存在')
+  assert.equal(def.type, 'enum')
+  assert.deepEqual(def.options, ['auto', 'http', 'tool'])
+  assert.equal(def.default, 'auto')
+  assert.equal(defaultSettings()['image.source'], 'auto')
+  assert.equal(readSettings({ settings: {} })['image.source'], 'auto')
+  for (const value of ['auto', 'http', 'tool']) {
+    const res = coerceSettings({ 'image.source': value }, defaultSettings())
+    assert.deepEqual(res.errors, [], value)
+    assert.equal(res.values['image.source'], value)
+    if (value === 'auto') assert.ok(!res.changed.includes('image.source'), value)
+    else assert.ok(res.changed.includes('image.source'), value)
+  }
+  const bad = coerceSettings({ 'image.source': 'cloud' }, defaultSettings())
+  assert.equal(bad.errors.length, 1)
+  assert.equal(bad.values['image.source'], 'auto')
+})

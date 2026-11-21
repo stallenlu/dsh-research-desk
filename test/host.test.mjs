@@ -1591,3 +1591,60 @@ test('draft_image：万相协议走异步任务状态机（提交→轮询→成
     else process.env.RD_IMAGE_POLL_MS = previous
   }
 })
+
+
+// ── 生图通道三档：自动／只用自带密钥／只用订阅生图工具 ─────────────────────────
+test('image.source=http：即使探到订阅工具也不执行工具，走自带密钥 HTTP', async () => {
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: [] } }))
+  const fixture = await makeApprovedFixture(tools, true)
+  await fixture.svc.run({ action: 'settings', patch: Object.assign({}, HTTP_SETTINGS, { 'image.source': 'http' }) })
+  const fetchCalls = []
+  const stub = async () => { fetchCalls.push(1); return okJson({ data: [{ b64_json: PNG_BYTES.toString('base64') }] })() }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '只用自带密钥'))
+    assert.equal(res.ok, true, res.message)
+    assert.equal(calls.length, 0, '探到工具也不得执行工具')
+    assert.equal(fetchCalls.length, 1, '必须走 HTTP')
+  }))
+})
+
+test('image.source=tool：即使配了 HTTP 密钥，无工具也报不可用且不联网', async () => {
+  const fixture = await configureHttp(await makeApprovedFixture(null, true))
+  await fixture.svc.run({ action: 'settings', patch: { 'image.source': 'tool' } })
+  let fetched = 0
+  const stub = async () => { fetched++; throw new Error('不应联网') }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '只用订阅工具'))
+    assert.equal(res.ok, false)
+    assert.equal(res.message, '未找到可用的订阅生图工具，这一版配图暂时做不了。')
+    assert.equal(fetched, 0, '只用订阅工具时不得走 HTTP')
+  }))
+})
+
+test('image.source=tool：有订阅工具时执行工具且不联网', async () => {
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: [] } }))
+  const fixture = await configureHttp(await makeApprovedFixture(tools, true))
+  await fixture.svc.run({ action: 'settings', patch: { 'image.source': 'tool' } })
+  const inside = join(fixture.t.dir, 'plugins', 'subscriptions', 'images', 'tool-only.png')
+  writeFileSync(inside, PNG_BYTES)
+  tools.execute = async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: { isError: false, value: { paths: [inside] } } })) } }
+  let fetched = 0
+  const stub = async () => { fetched++; throw new Error('不应联网') }
+  await withImageKey(() => withFetchStub(stub, async () => {
+    const res = await fixture.svc.run(approvedArgs(fixture.collabId, fixture.decisionId, '只用订阅工具'))
+    assert.equal(res.ok, true, res.message)
+    assert.equal(calls.length, 1)
+    assert.equal(fetched, 0)
+  }))
+})
+
+test('settingsView 返回 imageToolAvailable 布尔值，探测工具但不执行', async () => {
+  freshService()
+  const { tools, calls } = draftImageTools(() => ({ isError: false, value: { paths: [] } }))
+  const withTool = await createService(draftImageCtx(tools)).run({ action: 'settings' })
+  assert.equal(withTool.ok, true)
+  assert.equal(withTool.imageToolAvailable, true)
+  assert.equal(calls.length, 0, '探测工具不得执行')
+  const withoutTool = await createService(draftImageCtx(null)).run({ action: 'settings' })
+  assert.equal(withoutTool.imageToolAvailable, false)
+})

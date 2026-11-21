@@ -920,3 +920,56 @@ test('two run tracks are labelled honestly in plain words', () => {
   assert.ok(src.includes('onClick: runLab'), 'lab run button onClick unchanged')
   assert.ok(src.includes("runCollabAction('collab_run', selectedCollab.id"), 'collab run button onClick unchanged')
 })
+
+
+test('image.source 三档开关与九家服务商预设真值逐字落地', () => {
+  const settingsSrc = readFileSync(new URL('../lib/settings.mjs', import.meta.url), 'utf8')
+  assert.ok(settingsSrc.includes("key: 'image.source'"), 'image.source 定义缺失')
+  assert.ok(settingsSrc.includes("options: ['auto', 'http', 'tool']"), '三档选项缺失')
+  assert.ok(settingsSrc.includes("default: 'auto'"), '缺省必须为 auto')
+  const at = src.indexOf('const IMAGE_PRESETS = [')
+  const block = src.slice(at, src.indexOf('const applyImagePreset', at))
+  assert.ok(block, 'IMAGE_PRESETS 区块缺失')
+  const expect = [
+    ['OpenAI', { protocol: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-1', size: '1536x1024', quality: 'medium' }],
+    ['xAI', { protocol: 'openai', baseUrl: 'https://api.x.ai/v1', model: 'grok-2-image', size: '' }],
+    ['火山方舟', { protocol: 'openai', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: '', size: '1024x1024' }],
+    ['智谱', { protocol: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'cogview-4', size: '1024x1024' }],
+    ['硅基流动', { protocol: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', model: '', size: '', extra: '{"image_size":"1024x1024"}' }],
+    ['阿里云百炼', { protocol: 'bailian', baseUrl: 'https://dashscope.aliyuncs.com', model: 'qwen-image-2.0-pro', size: '2688x1536' }],
+    ['百炼Token Plan', { protocol: 'bailian', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com', model: 'qwen-image-3.0-pro', size: '1024x1024' }],
+    ['百炼万相异步', { protocol: 'wan', baseUrl: 'https://dashscope.aliyuncs.com', model: 'wan2.5-t2i-preview', size: '1280x1280' }],
+  ]
+  for (const [label, fields] of expect) {
+    const line = block.split('\n').find(l => l.includes("label: '" + label + "'"))
+    assert.ok(line, '预设缺失：' + label)
+    for (const [k, v] of Object.entries(fields)) assert.ok(line.includes("'image." + k + "': '" + v + "'"), label + ' 的 ' + k + ' 不真')
+  }
+  const custom = block.split('\n').find(l => l.includes("label: '其他自定义'"))
+  assert.ok(custom, '其他自定义预设缺失')
+  assert.ok(!custom.includes("'image.protocol'"), '其他自定义不得改协议')
+  assert.ok(custom.includes("'image.baseUrl': ''"))
+  assert.ok(custom.includes("'image.model': ''"))
+  assert.ok(custom.includes("'image.size': '1024x1024'"))
+})
+
+test('点一次预填只写草稿：一次 setSettingDraft 写多字段，保存才落盘', () => {
+  assert.ok(src.includes('const applyImagePreset = patch => setSettingDraft(prev => ({ ...prev, ...patch }))'), '预填必须一次调用写多字段')
+  assert.ok(src.includes('onClick: () => applyImagePreset(preset.patch)'), '按钮必须调用预填 handler')
+  assert.ok(src.includes("className: 'md-presets', key: 'presets'"), '预填按钮要复用 md-presets 样式')
+  assert.ok(src.includes("'生图服务商一键预填'"), '预填行白话标签缺失')
+})
+
+test('image 页渲染订阅生图工具可用性小字，且提示诚实', () => {
+  const at = src.indexOf("settingsPage === 'image'")
+  const page = src.slice(at, src.indexOf("settingsPage === 'effort'", at))
+  assert.ok(page.includes('imageToolTip'), 'image 页必须渲染工具可用性小字')
+  assert.ok(src.includes('const imageToolTip = imageToolAvailable'), '提示必须由状态驱动')
+  assert.ok(src.includes('检测到订阅生图工具'), '有工具提示缺失')
+  assert.ok(src.includes('未检测到订阅生图工具'), '无工具提示缺失')
+  assert.ok(src.includes('选只用订阅生图工具会生成失败'), '无工具时的诚实失败提示缺失')
+  assert.ok(src.includes('const [imageToolAvailable, setImageToolAvailable] = useState(false)'), '状态缺失')
+  assert.ok(src.includes('setImageToolAvailable(d.imageToolAvailable === true)'), '设置返回必须喂给状态')
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  assert.ok(host.includes('imageToolAvailable: Boolean(draftImageTool(ctx))'), 'settingsView 必须暴露探测结果')
+})
