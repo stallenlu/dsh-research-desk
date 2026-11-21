@@ -570,7 +570,7 @@ test('C+E 语义召回：粗召回补位 + 同义词表 + 一行候选清单交�
 test('模型列表加载失败可重试，面板不误导显示科灵模型', () => {
   assert.ok(/const \[modelsStatus, setModelsStatus\] = useState\('loading'\)/.test(src), 'must track model load status')
   assert.ok(/const loadModels = useCallback\(async \(\) =>/.test(src), 'must have a reusable loadModels helper')
-  assert.ok(/setSettingsPage\('model'\); loadModels\(\)/.test(src), 'opening the model page must reload the list')
+  assert.ok(/setSettingsPage\('menu'\); loadModels\(\)/.test(src), 'opening the model menu must reload the list')
   assert.ok(/modelsStatus === 'error'/.test(src) && src.includes('md-model-retry') && src.includes('重新读取'), 'failed load must offer a retry button')
   assert.ok(/modelsStatus === 'loading' \? '正在读取可用模型…'/.test(src), 'loading state must show honest loading copy')
   assert.ok(!src.includes("'科灵模型'"), 'fallback label must not pretend a 科灵模型 exists')
@@ -835,13 +835,13 @@ test('批次1 composer 工具行有可见盾牌 indicator，文案含「当前�
   assert.ok(js.includes('默认只能查看。选更高档只是记下你的偏好，不会立刻提权：科灵每次调用工具仍要你在决策区点头，实际按只读运行；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
 })
 
-test('模型胶囊 onClick 直达 model 页做模型快切，不回 root', () => {
+test('模型胶囊 onClick 进入两级菜单 menu 根页，加载模型并切换浮层', () => {
   const line = src.split('\n').find(l => l.includes("className: 'md-ctool md-ctool-model md-settings-trigger'"))
   assert.ok(line, '模型胶囊按钮缺失')
-  assert.ok(line.includes("setSettingsPage('model')"), '点开须直达 model 页')
+  assert.ok(line.includes("setSettingsPage('menu')"), '点开须进入 menu 两级菜单根页')
   assert.ok(line.includes('loadModels()'), '点开须刷新可用模型列表')
   assert.ok(line.includes('setSettingsPanelOpen(v => !v)'), '点开仍须切换浮层开合')
-  assert.ok(!line.includes("setSettingsPage('root')"), '不得再回 root 页，模型快切须直达')
+  assert.ok(!line.includes("setSettingsPage('root')"), '不得回 root 设置清单页')
 })
 
 test('盾牌 indicator onClick 仍只进权限页，不提权', () => {
@@ -1060,22 +1060,50 @@ test('旧 showSettings 死代码已清除，设置对话框改走复用 Dialog �
   assert.ok(src.includes("key: 'setdlg'"), '设置对话框 key 必须存在')
 })
 
-test('other 子页存在并承接 30 项 settingRows 单一渲染', () => {
-  assert.ok(src.includes("settingsPage === 'other'"), 'other 子页分支缺失')
-  const at = mustFind(src, "settingsPage === 'other'", 'other settings page')
-  const page = src.slice(at, mustFind(src, "key: 'effort'", 'effort key', at))
-  assert.ok(page.includes("...settingRows.filter(r => r.key !== 'model.route').map(renderField)"), 'other 页必须渲染 30 项设置')
-  assert.ok(page.includes('md-settings-body') && page.includes('md-settings-back'), 'other 页须复用既有面板样式与返回按钮')
-  assert.ok(page.includes('saveSettings') && page.includes('resetSettings'), 'other 页须保留保存设置/恢复默认')
+test('设置按产品对象分为五组子页，各组按 key 前缀单一渲染且均有 back/保存/恢复', () => {
+  const groups = [
+    ['assistant', "r.key === 'kelin.role'"],
+    ['retrieval', "['sources', 'maxResults', 'qa.', 'review.'].some(p => r.key === p || r.key.indexOf(p) === 0)"],
+    ['experiment', "r.key.indexOf('runner.') === 0 || r.key.indexOf('stats.') === 0"],
+    ['data', "r.key.indexOf('privacy.') === 0 || r.key.indexOf('storage.') === 0 || r.key.indexOf('secrets.') === 0"],
+  ]
+  const marks = ['assistant', 'retrieval', 'experiment', 'data', 'ui']
+  const positions = marks.map(k => mustFind(src, "settingsPage === '" + k + "'", k + ' settings page'))
+  positions.forEach((at, i) => {
+    // 取本 marker 起固定窗口，覆盖该页自身的 body/back/save/reset；不依赖下一页或 effort 的相对顺序
+    const page = src.slice(at, at + 3400)
+    assert.ok(page.includes("className: 'md-settings-body', key: '" + marks[i] + "'"), marks[i] + ' 页须复用 md-settings-body 且 key 正确')
+    assert.ok(page.includes("className: 'md-settings-row md-settings-back', onClick: () => setSettingsPage('root')"), marks[i] + ' 页 back 须回到 root')
+    assert.ok(page.includes('saveSettings') && page.includes('resetSettings'), marks[i] + ' 页须保留保存设置/恢复默认')
+  })
+  for (const [key, filterExpr] of groups) {
+    const line = src.split('\n').filter(l => l.includes(filterExpr) && l.includes('map(renderField)'))
+    assert.equal(line.length, 1, key + ' 组字段须恰好单一渲染')
+  }
+  assert.ok(!src.includes("settingsPage === 'other'"), 'other 子页须移除，不再承载混杂字段')
 })
 
-test('root 页含「其他与界面偏好」入口行且复用 chevR 同构样式', () => {
+test('root 页按产品对象列出六组入口，每组 md-settings-row + chevR + 对应子页跳转', () => {
   const rootAt = mustFind(src, "className: 'md-settings-body', key: 'root'", 'root settings page')
-  const root = src.slice(rootAt, mustFind(src, "settingsPage === 'model'", 'model settings page', rootAt))
-  assert.ok(root.includes("key: 'other', className: 'md-settings-row'"), 'root 页缺少「其他与界面偏好」入口行')
-  assert.ok(root.includes('其他与界面偏好'), '入口行 label 缺失')
-  assert.ok(root.includes("setSettingsPage('other')"), '入口行必须跳到 other 页')
-  assert.ok(root.includes("I({ name: 'chevR', size: 14 })"), '入口行须复用 chevR 箭头')
+  const root = src.slice(rootAt, mustFind(src, "settingsPage === 'menu'", 'menu settings page', rootAt))
+  const lines = root.split('\n')
+  const entries = [
+    ['assistant', '模型与协作'],
+    ['retrieval', '检索与综述'],
+    ['experiment', '实验与统计'],
+    ['data', '数据与隐私'],
+    ['ui', '界面偏好'],
+    ['image', '生图配置'],
+  ]
+  for (const [key, label] of entries) {
+    const idx = lines.findIndex(l => l.includes("key: '" + key + "', className: 'md-settings-row'"))
+    assert.ok(idx >= 0, 'root 页缺少入口：' + label)
+    const row = lines.slice(idx, idx + 3).join('\n')
+    assert.ok(row.includes(label), label + ' 入口 label 缺失')
+    assert.ok(row.includes("setSettingsPage('" + key + "')"), label + ' 入口须跳到 ' + key + ' 子页')
+    assert.ok(row.includes("I({ name: 'chevR', size: 14 })"), label + ' 入口须复用 chevR 箭头')
+  }
+  assert.ok(!root.includes("key: 'other'"), 'root 页不得再出现 other 入口')
 })
 
 test('四项界面偏好处理函数源码仍在，零功能倒退', () => {
@@ -1086,12 +1114,10 @@ test('四项界面偏好处理函数源码仍在，零功能倒退', () => {
   assert.ok(src.includes("role: 'radiogroup'") && src.includes("'aria-label': '语言'"), '语言 segment 语义丢失')
 })
 
-test('image.* 字段仅在 image 子页单一渲染，不再与 other 页重复', () => {
+test('字段按 key 前缀分组单一渲染：image.* 只在 image 页，model.route 不出现在任何组', () => {
   const renderLines = src.split('\n').filter(l => l.includes("settingRows.filter(r => r.key.indexOf('image.') === 0).map(renderField)"))
   assert.equal(renderLines.length, 1, 'image.* 渲染必须只有一处')
-  const otherAt = mustFind(src, "settingsPage === 'other'", 'other settings page')
-  const other = src.slice(otherAt, mustFind(src, "key: 'effort'", 'effort key', otherAt))
-  assert.ok(!other.includes("r.key.indexOf('image.')"), 'other 页不得重复渲染 image.* 字段')
+  assert.ok(!src.includes("settingRows.filter(r => r.key !== 'model.route').map(renderField)"), '混杂过滤须移除')
 })
 // ---- 齿轮设置不再强制展开科灵 dock：独立 Dialog + 内容单一渲染源 ----
 test('齿轮 onClick 不再 setDockOpen，改为在根层开独立设置对话框', () => {
@@ -1126,12 +1152,12 @@ test('closeSettings 同时关闭浮层与对话框；内容块关闭动作改造
   const useAt = mustFind(src, 'const closeSettings = () =>', 'closeSettings')
   const panelAt = mustFind(src, 'const settingsPanel = (settingsPanelOpen', 'settingsPanel')
   const block = src.slice(useAt, panelAt)
-  assert.equal((block.match(/closeSettings\(\)/g) || []).length, 5, '内容块 5 处关闭动作须改调 closeSettings()')
+  assert.equal((block.match(/closeSettings\(\)/g) || []).length, 7, '内容块 7 处关闭动作须改调 closeSettings()（含 menu 与 assistant 两处团队协作真实跳转）')
   assert.ok(!block.slice(block.indexOf('\n')).includes('setSettingsPanelOpen(false)'), '内容块内不得残留直接 setSettingsPanelOpen(false)（closeSettings 定义本身除外）')
   const effAt = mustFind(src, 'if (!settingsPanelOpen) return', 'settings panel effect')
   const effBlock = src.slice(effAt, mustFind(src, '}, [settingsPanelOpen])', 'settings panel effect end', effAt))
   assert.equal((effBlock.match(/setSettingsPanelOpen\(false\)/g) || []).length, 2, 'useEffect 两处关闭须保持原样')
-  for (const t of ['模型', '推理等级', '权限模式', '生图配置', '智能体团队协作', '其他与界面偏好', '跟随默认', '推理等级越高，回答越审慎，耗时也更长。']) {
+  for (const t of ['模型', '推理等级', '权限模式', '生图配置', '智能体团队协作', '模型与协作', '检索与综述', '跟随默认', '推理等级越高，回答越审慎，耗时也更长。']) {
     assert.ok(src.includes(t), '设置项文案丢失：' + t)
   }
 })
@@ -1149,35 +1175,52 @@ test('齿轮改造新增片段零新增硬编码 hex', () => {
 })
 
 // ---- 设置根页瘦身（用户投诉：模型/推理等级/权限/智能团队不该堆在设置首屏）----
-test('设置根页只保留生图配置与其他与界面偏好两个入口，模型相关与智能团队入口已移出', () => {
+test('设置根页只列产品对象分组，模型/推理/团队入口下沉到 menu 子页', () => {
   const rootAt = mustFind(src, "className: 'md-settings-body', key: 'root'", 'root 设置页')
-  const root = src.slice(rootAt, mustFind(src, "settingsPage === 'model'", 'model settings page', rootAt))
-  for (const k of ['model', 'effort', 'perm', 'team', 'teamtip']) {
-    assert.ok(!root.includes("key: '" + k + "'"), 'root 页不得再出现 key:' + k + ' 入口')
+  const root = src.slice(rootAt, mustFind(src, "settingsPage === 'menu'", 'menu settings page', rootAt))
+  for (const k of ['model', 'effort', 'perm', 'team', 'teamtip', 'assistant', 'retrieval', 'experiment', 'data', 'ui', 'image']) {
+    // assistant/retrieval/.../image 是合法的六组入口；model/effort/perm/team/teamtip 才是被下沉的旧入口
+    if (['assistant', 'retrieval', 'experiment', 'data', 'ui', 'image'].includes(k)) {
+      assert.ok(root.includes("key: '" + k + "', className: 'md-settings-row'"), 'root 页须含分组入口 ' + k)
+    } else {
+      assert.ok(!root.includes("key: '" + k + "'"), 'root 页不得再出现旧入口 key:' + k)
+    }
   }
+  assert.ok(root.includes("key: 'assistant', className: 'md-settings-row'"), 'root 页须保留模型与协作入口')
   assert.ok(root.includes("key: 'image', className: 'md-settings-row'"), 'root 页须保留生图配置入口')
-  assert.ok(root.includes("key: 'other', className: 'md-settings-row'"), 'root 页须保留其他与界面偏好入口')
 })
 
-test('推理等级入口下沉到 model 子页，返回回到 model 而非 root', () => {
+test('模型菜单做两级：menu 根页含模型/推理/团队协作三入口，model 与 effort 返回 menu', () => {
+  const menuAt = mustFind(src, "className: 'md-settings-body', key: 'menu'", 'menu settings page')
+  const menu = src.slice(menuAt, mustFind(src, "settingsPage === 'model'", 'model settings page', menuAt))
+  const lines = menu.split('\n')
+  const rows = [
+    ['model', '模型', "setSettingsPage('model')"],
+    ['effort', '推理等级', "setSettingsPage('effort')"],
+    ['team', '智能体团队协作', null],
+  ]
+  for (const [key, label, target] of rows) {
+    const idx = lines.findIndex(l => l.includes("key: '" + key + "', className: 'md-settings-row'"))
+    assert.ok(idx >= 0, 'menu 根页缺少入口：' + label)
+    const row = lines.slice(idx, idx + 3).join('\n')
+    assert.ok(row.includes(label), label + ' 行 label 缺失')
+    assert.ok(row.includes("I({ name: 'chevR', size: 14 })"), label + ' 行须复用 chevR 箭头')
+    if (target) assert.ok(row.includes(target), label + ' 行须跳到 ' + target)
+  }
   const modelAt = mustFind(src, "className: 'md-settings-body', key: 'model'", 'model 设置子页')
   const model = src.slice(modelAt, mustFind(src, "settingsPage === 'perm'", 'perm settings page', modelAt))
-  const mLines = model.split('\n')
-  const effortIdx = mLines.findIndex(l => l.includes("key: 'effort', className: 'md-settings-row'"))
-  assert.ok(effortIdx >= 0, 'model 子页缺少推理等级入口行')
-  const effortRow = mLines.slice(effortIdx, effortIdx + 3).join('\n')
-  assert.ok(effortRow.includes("onClick: () => setSettingsPage('effort')"), '入口须跳 effort 子页')
-  assert.ok(/I\(\{\s*name: 'chevR', size: 14\s*\}\)/.test(effortRow), '入口须复用 chevR 箭头')
+  assert.ok(!model.includes("key: 'effort', className: 'md-settings-row'"), 'model 子页不得再内嵌推理等级入口')
+  assert.ok(model.includes("key: 'back', className: 'md-settings-row md-settings-back', onClick: () => setSettingsPage('menu')"), 'model back 须回到 menu')
   const effortAt = mustFind(src, "className: 'md-settings-body', key: 'effort'", 'effort settings page')
-  const effort = src.slice(effortAt, effortAt + 600)
-  assert.ok(effort.includes("key: 'back', className: 'md-settings-row md-settings-back', onClick: () => setSettingsPage('model')"), '推理等级返回须回到 model 子页')
+  const effort = src.slice(effortAt, effortAt + 700)
+  assert.ok(effort.includes("key: 'back', className: 'md-settings-row md-settings-back', onClick: () => setSettingsPage('menu')"), '推理等级返回须回到 menu')
 })
 
 test('科灵栏三入口 onClick 未被瘦身改动（盾牌进权限 / 模型胶囊直达 / 靶心开协作）', () => {
   const perm = src.split('\n').find(l => l.includes("key: 'permind'"))
   assert.ok(perm.includes("onClick: () => { setSettingsPage('perm'); setSettingsPanelOpen(v => !v) }"), '盾牌 onClick 被改动')
   const model = src.split('\n').find(l => l.includes("className: 'md-ctool md-ctool-model md-settings-trigger'"))
-  assert.ok(model.includes("onClick: () => { setSettingsPage('model'); loadModels(); setSettingsPanelOpen(v => !v) }"), '模型胶囊 onClick 被改动')
+  assert.ok(model.includes("onClick: () => { setSettingsPage('menu'); loadModels(); setSettingsPanelOpen(v => !v) }"), '模型胶囊 onClick 须进入 menu 根页')
   const ask = src.split('\n').find(l => l.includes("key: 'askcollab'"))
   assert.ok(ask && /onClick:\s*function\s*\(\)\s*\{\s*openCollabWithGoal\(input\)\s*\}/.test(ask), '靶心 onClick 被改动')
 })
@@ -1206,4 +1249,21 @@ test('P0-1 代表 marker 缺失时 -1 不得参与比较/切片（负控）', ()
   const pickSafe = (marker, len) => { const i = src.indexOf(marker); return i < 0 ? '' : src.slice(i, i + len) }
   assert.equal(pickSafe(missing, 200), '', 'missing marker must yield empty region, not a slice from -1')
   assert.throws(() => mustFind(src, missing, 'negative control'), /must exist/, 'mustFind must fail loudly on a missing marker')
+})
+
+// ---- 团队协作入口：真实跳转而非假控件/假状态（能力边界 1.3；不依赖注释）----
+test('团队协作入口是 md-settings-row + chevR 真实跳转到 lab，不是 Switch 也不是 localStorage 假状态', () => {
+  const teamLines = src.split('\n').filter(l => l.includes("key: 'team', className: 'md-settings-row'"))
+  assert.equal(teamLines.length, 2, 'menu 与 assistant 各须一处团队协作真实入口，实际=' + teamLines.length)
+  for (const line of teamLines) {
+    assert.ok(line.includes("onClick: () => { setView('lab'); closeSettings() }"), '团队协作须真实 setView(lab) 并关闭设置：' + line.trim())
+    assert.ok(!line.includes('localStorage'), '团队协作不得写 localStorage 假状态')
+    assert.ok(!line.includes('setTechTeamEnabled') && !line.includes('Switch') && !line.includes('md-check'), '团队协作不得做成开关假控件')
+  }
+  const teamRows = src.split('\n').filter(l => l.includes('到虚空靶心·真实协作在这里'))
+  assert.equal(teamRows.length, 2, '两处团队协作入口均须带「到虚空靶心·真实协作在这里」值文案 + chevR')
+  for (const row of teamRows) {
+    assert.ok(/I\(\{\s*name: 'chevR', size: 14\s*\}\)/.test(row), '团队协作入口须复用 chevR 箭头')
+  }
+  assert.ok(src.includes("const [view, setView] = useState"), 'setView 必须是真实视图状态 setter，而非本地假状态')
 })
