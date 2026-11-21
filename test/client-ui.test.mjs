@@ -866,7 +866,7 @@ test('settingsBody() 仍恰好两处复用（浮层 + 对话框）', () => {
 test('批次2 +号命令目录：渲染 status.commands，只读 action 直接 call，写 action 只填提示', () => {
   assert.ok(js.includes("const READONLY_CMDS = ['status', 'models', 'settings', 'stats', 'library', 'history', 'experiments', 'collab_list']"), 'read-only action whitelist must be explicit')
   assert.ok(js.includes("const r = await call({ action: 'status' })") && js.includes('Array.isArray(r && r.commands) ? r.commands : []'), 'catalog must read commands from status response')
-  assert.ok(js.includes("F({ key: 'cmdcatalog', icon: 'plus', size: 13, className: 'md-ctool', label: '命令目录', onClick: openCommandMenu })"), 'composer + button must be distinct from top new-chat plus')
+  assert.ok(js.includes("F({ key: 'cmdcatalog', icon: 'plus', size: 13, className: 'md-ctool md-cmdmenu-trigger', label: '命令目录', onClick: openCommandMenu })"), 'composer + button must be distinct from top new-chat plus')
   assert.ok(js.includes("cmdCatalog.filter(function (c) { return c && c.action }).map(function (c, ci)"), 'every listed item must map to a real action')
   assert.ok(js.includes("className: 'md-chatmenu md-cmdmenu'") && js.includes('cmdMenuOpen ? h('), 'overlay must reuse md-chatmenu visual syntax')
   assert.ok(js.includes("style: { left: '0', right: 'auto', width: '272px', top: 'auto', bottom: 'calc(100% + 4px)', maxHeight: 'min(320px, calc(100vh - 120px))' }"), 'cmdmenu must flip upward (top:auto + bottom:calc(100% + 4px)) overriding base top:100%, and clamp maxHeight with calc(100vh')
@@ -1266,4 +1266,47 @@ test('团队协作入口是 md-settings-row + chevR 真实跳转到 lab，不是
     assert.ok(/I\(\{\s*name: 'chevR', size: 14\s*\}\)/.test(row), '团队协作入口须复用 chevR 箭头')
   }
   assert.ok(src.includes("const [view, setView] = useState"), 'setView 必须是真实视图状态 setter，而非本地假状态')
+})
+
+// ---- 关3 迭代：枚举中文化（显示/取值分离）+ 命令/对话菜单外部关闭与 Esc ----
+test('关3 枚举中文化：optionLabel 显示层存在、六字段中文文案逐字在位、底层英文值不动', () => {
+  assert.ok(src.includes('const OPTION_LABELS = {'), 'OPTION_LABELS 映射表定义缺失')
+  assert.ok(src.includes('const optionLabel = (key, o) => {'), 'optionLabel 函数定义缺失')
+  assert.ok(src.includes('Object.prototype.hasOwnProperty.call(table, o) ? table[o] : o'), '未命中原样返回 o 的兜底缺失')
+  for (const cn of [
+    "arxiv: 'arXiv'", "europepmc: 'Europe PMC'", "openalex: 'OpenAlex'",
+    "lead: '带队'", "methodologist: '方法'", "engineer: '工程'", "analyst: '分析'",
+    "methodology: '方法学'", "evidence: '证据'", "contradictions: '矛盾与争议'",
+    "gaps: '研究缺口'", "applications: '应用与影响'",
+    "none: '不校正'", "holm: 'Holm 校正'", "bonferroni: 'Bonferroni 校正'",
+    "auto: '自动（优先订阅工具）'", "http: '只用自带密钥'", "tool: '只用订阅生图工具'",
+    "openai: 'OpenAI 兼容'", "bailian: '阿里百炼'", "wan: '万相异步'",
+  ]) assert.ok(src.includes(cn), '六字段中文文案缺失: ' + cn)
+  const enumLine = src.split('\n').find(l => l.includes("row.type === 'enum'") && l.includes("h('select'"))
+  assert.ok(enumLine, 'enum 分支行缺失')
+  assert.ok(enumLine.includes('optionLabel(row.key, o)'), 'enum 显示文字必须走 optionLabel')
+  assert.ok(enumLine.includes("h('option', { key: o, value: o }"), 'enum value/key 仍须绑英文 o')
+  assert.ok(enumLine.includes('onChange: e => set(e.target.value)'), 'enum onChange 仍须提交英文值')
+  const listLine = src.split('\n').find(l => l.includes('arr.includes(o)') && l.includes('optionLabel(row.key, o)'))
+  assert.ok(listLine, 'enumList 显示走 optionLabel 的行缺失')
+  assert.ok(listLine.includes('key: o'), 'enumList key 仍须为英文 o')
+  assert.ok(listLine.includes('arr.includes(o) ? arr.filter(x => x !== o) : arr.concat([o])'), 'enumList 提交仍须用英文 o')
+})
+
+test('关3 菜单：外部点击 capture + Esc 关闭，触发按钮排除在外部之外，cmd/chat 分别判定', () => {
+  const start = mustFind(src, '// 关3：命令目录/对话切换菜单外部点击与 Esc 关闭')
+  const menuEffect = src.slice(start, mustFind(src, '}, [cmdMenuOpen, chatMenuOpen])', start) + 30)
+  assert.ok(menuEffect.includes('useEffect(() => {'), '关闭逻辑须用 useEffect')
+  assert.ok(menuEffect.includes("document.addEventListener('pointerdown', onDown, true)"), 'pointerdown 必须 capture 监听')
+  assert.ok(menuEffect.includes("window.addEventListener('keydown', onKey, true)"), 'keydown 必须 capture 监听')
+  assert.ok(menuEffect.includes("e.key === 'Escape'"), 'Esc 关闭判定缺失')
+  assert.ok(menuEffect.includes('setCmdMenuOpen(false)') && menuEffect.includes('setChatMenuOpen(false)'), 'Esc 须同时关闭两个菜单')
+  assert.ok(menuEffect.includes("!t.closest('.md-cmdmenu') && !t.closest('.md-cmdmenu-trigger')"), 'cmd 菜单须排除自身菜单和触发按钮')
+  assert.ok(menuEffect.includes("!t.closest('.md-chatlistmenu') && !t.closest('.md-chatbar-cur')"), 'chat 菜单须排除自身菜单和触发按钮')
+  assert.ok(menuEffect.includes('return () => { document.removeEventListener'), 'cleanup 必须移除监听')
+  const fStart = mustFind(src, 'function F(props) {')
+  const fBody = src.slice(fStart, fStart + 400)
+  assert.ok(fBody.includes("(props.className || '')"), 'F 必须透传 className（锚点方案依据）')
+  assert.ok(src.includes("className: 'md-chatmenu md-chatlistmenu'"), 'chat 菜单专属锚点 md-chatlistmenu 缺失')
+  assert.ok(src.includes("className: 'md-ctool md-cmdmenu-trigger'"), 'cmd 触发按钮专属锚点 md-cmdmenu-trigger 缺失')
 })
