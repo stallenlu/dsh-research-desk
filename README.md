@@ -164,7 +164,7 @@
 
 > 说明：本节只做文案与可见性对齐，不改任何执行按钮的行为；界面文字的最终呈现以你自己 GUI 的实际体验为准。
 
-支撑这些页签的，是服务端 **45 个真实 action**（`lib/host.mjs:40`，并在 switch 中逐一分发到真实实现，含场景化配图 `draft_image`），按能力归类：
+支撑这些页签的，是服务端 **45 个真实 action**（`lib/host.mjs:42`，并在 switch 中逐一分发到真实实现，含场景化配图 `draft_image`），按能力归类：
 
 | 能力域 | 代表性 action |
 | --- | --- |
@@ -286,7 +286,7 @@
 - **四项宿主注入**：启动时向宿主申请 `tools`、`webServer`、`agents`、`attachments` 四项能力（`lib/host.mjs:32`）——分别对应「给 agent 用的工具入口」「侧栏面板用的 HTTP 路由」「团队协作时的多智能体创建」「图片提纯入库」。这四项是宿主注入进来的，科灵台只使用、不重造；少了任何一项，对应的功能就没有落点。
 - **权限预设**：团队协作里创建子智能体时，用宿主提供的 `permissionPresets` 权限预设把子会话限制在只读等档位（`lib/host.mjs:1729`、`lib/host.mjs:1887`）。也就是说，科灵台自己不另定义一套权限，只沿用 DSH 的审批语义。
 - **LLM 模型目录由你在 DSH 里配置**：科灵（AI 助手）的模型列表来自宿主的模型目录——服务端通过 `listProviders` / `listModels` 读取你在 DSH 设置里配好的模型，再用 `streamText` 发起流式生成（`lib/llm.mjs:25`、`lib/llm.mjs:51`）。**代码里没有任何硬编码的 API Key，也不需要你在科灵台里另填密钥**：要换模型、换服务商，去 DSH 的设置里配就行。
-- **同源 HTTP 桥**：侧栏面板与 agent 工具走的是同一套服务实现——面板通过同源路由 `/api/research-desk/` 调服务端（`lib/host.mjs:2212`），agent 通过 `research_desk` 工具调服务端（`lib/host.mjs:2214`），两者共用同一份状态文件，界面和科灵不会「各说各话」。服务端把 45 个动作算好（`lib/host.mjs:40`），客户端只渲染结果——这正是前文说的「服务端算好、客户端只渲染」。
+- **同源 HTTP 桥**：侧栏面板与 agent 工具走的是同一套服务实现——面板通过同源路由 `/api/research-desk/` 调服务端（`lib/host.mjs:2882`），agent 通过 `research_desk` 工具调服务端（`lib/host.mjs:2884`），两者共用同一份状态文件，界面和科灵不会「各说各话」。服务端把 45 个动作算好（`lib/host.mjs:42`），客户端只渲染结果——这正是前文说的「服务端算好、客户端只渲染」。
 - **本地状态文件**：你的灵感、文献、会话都存在本机的 `state.json` 里，位置是**用户目录下的 `.dsh/research-desk/`**（例如 `C:/Users/<你的用户名>/.dsh/research-desk/state.json`；也可用 `DSH_HOME` 指向别处，`lib/store.mjs:27`、`lib/store.mjs:87`）。没有云端账号，数据只留在这台机器上。
 
 ### 7.3 依赖的外部数据源与致谢
