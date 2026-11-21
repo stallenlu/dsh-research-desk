@@ -795,6 +795,34 @@ test('批次1 composer 工具行有可见盾牌 indicator，文案含「当前�
   assert.ok(js.includes('默认只能查看。选更高档只是记下你的偏好，不会立刻提权：科灵每次调用工具仍要你在决策区点头，实际按只读运行；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
 })
 
+test('模型胶囊 onClick 直达 model 页做模型快切，不回 root', () => {
+  const line = src.split('\n').find(l => l.includes("className: 'md-ctool md-ctool-model md-settings-trigger'"))
+  assert.ok(line, '模型胶囊按钮缺失')
+  assert.ok(line.includes("setSettingsPage('model')"), '点开须直达 model 页')
+  assert.ok(line.includes('loadModels()'), '点开须刷新可用模型列表')
+  assert.ok(line.includes('setSettingsPanelOpen(v => !v)'), '点开仍须切换浮层开合')
+  assert.ok(!line.includes("setSettingsPage('root')"), '不得再回 root 页，模型快切须直达')
+})
+
+test('盾牌 indicator onClick 仍只进权限页，不提权', () => {
+  const line = src.split('\n').find(l => l.includes("key: 'permind'"))
+  assert.ok(line, '盾牌 indicator 缺失')
+  assert.ok(line.includes("setSettingsPage('perm'); setSettingsPanelOpen(v => !v)"), '盾牌须保持进权限页')
+})
+
+test('齿轮 onClick 仍在根层开独立对话框，不碰 dock', () => {
+  const gear = src.split('\n').find(l => l.includes("key: 'gear', icon: 'gear', label: '设置'"))
+  assert.ok(gear, '顶栏齿轮按钮缺失')
+  assert.ok(gear.includes("setSettingsPage('root')"), '齿轮须复位 root 页')
+  assert.ok(gear.includes('setSettingsDialogOpen(true)'), '齿轮须开独立对话框')
+  assert.ok(!gear.includes('setDockOpen'), '齿轮不得碰 dock 开合')
+})
+
+test('settingsBody() 仍恰好两处复用（浮层 + 对话框）', () => {
+  const calls = (src.match(/settingsBody\(\)/g) || []).length
+  assert.equal(calls, 2, 'settingsBody() 须恰好两处调用，实际=' + calls)
+})
+
 test('批次2 +号命令目录：渲染 status.commands，只读 action 直接 call，写 action 只填提示', () => {
   assert.ok(js.includes("const READONLY_CMDS = ['status', 'models', 'settings', 'stats', 'library', 'history', 'experiments', 'collab_list']"), 'read-only action whitelist must be explicit')
   assert.ok(js.includes("const r = await call({ action: 'status' })") && js.includes('Array.isArray(r && r.commands) ? r.commands : []'), 'catalog must read commands from status response')
