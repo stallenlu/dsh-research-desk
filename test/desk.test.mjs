@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { cleanText, parseJsonLoose, isHttpUrl, toNumber } from '../lib/util.mjs'
-import { applyOps, emptyState, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD } from '../lib/desk.mjs'
+import { applyOps, cleanProfileList, emptyState, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD } from '../lib/desk.mjs'
 import { Store, revertChange } from '../lib/store.mjs'
 import { chunkText, retrieve, tokenize, ask } from '../lib/qa.mjs'
 
@@ -370,4 +370,32 @@ test('desk: migrateState 白名单保留 handoff，chats[] 仍是单一真相源
   assert.equal(state.activeChatId, 'c_handoff')
   assert.equal(state.chats[0].handoff, handoff, 'handoff 必须过 schema 白名单保留')
   assert.equal(state.chats[0].outcomes.length >= 0, true, 'outcomes 四枚举字段仍存在')
+})
+
+test('desk: cleanProfileList 过滤疑似秘密串，保留合法研究项', () => {
+  const legit = ['图神经网络', 'arXiv', '先综述']
+  const secrets = ['密码 hunter2', 'api_key=abcd1234', 'Bearer abc', 'sk-abcdef']
+  const all = legit.concat(secrets)
+  const out = cleanProfileList(all)
+  assert.deepEqual(out, legit, '合法研究偏好必须保留，秘密串必须丢弃')
+  assert.deepEqual(cleanProfileList('not an array'), [], '非数组输入返回空数组')
+})
+
+test('desk: set_profile 写入有界画像变更留痕（before/after/at）', () => {
+  const state = emptyState()
+  for (let i = 0; i < 22; i++) {
+    const res = applyOps(state, [{ op: 'set_profile', focus: ['方向' + i], sources: [], habits: [] }])
+    assert.equal(res.errors.length, 0)
+  }
+  assert.equal(state.profileJournal.length, 20, '画像留痕必须封顶 20 条')
+  const last = state.profileJournal[state.profileJournal.length - 1]
+  assert.equal(last.before.focus[0], '方向20', '最后一条留痕的 before 是上一版画像')
+  assert.equal(last.after.focus[0], '方向21', '最后一条留痕的 after 是本版画像')
+  assert.ok(typeof last.at === 'string' && last.at.length > 0, 'at 必须是时间戳字符串')
+})
+
+test('desk: migrateState 把非法 profileJournal 归一为空数组', () => {
+  const state = migrateState({ profileJournal: '乱码' })
+  assert.deepEqual(state.profileJournal, [])
+  assert.deepEqual(emptyState().profileJournal, [])
 })
