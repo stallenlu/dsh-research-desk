@@ -181,7 +181,7 @@ test('status 与 models 两个动作都返回 ok', async () => {
     applied: 'read-only',
     labels: { 'read-only': '仅可查看', 'workspace-write': '工作区内修改', 'danger-full-access': '完全权限' },
     upgradable: true,
-    note: '按只读闸门运行；选高档仅记偏好，高风险须人工拍板',
+    note: '按已确认档生效；装包、发包、改工作区三类高风险动作仍须在决策区拍板，完全权限按 DSH never 语义一律拒绝审批请求，不是免审批',
   })
 
   const models = await svc.run({ action: 'models' })
@@ -204,8 +204,9 @@ test('collab_stream 落库消息带 usageText，done 帧带 perm', async () => {
     get: name => name === 'agents' ? { create: async opts => { if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } } : ctx.get(name),
     on: () => () => {},
     permissionPresets: {
+      names: ['workspace-write', 'danger-full-access'],
       set: async (sess, v) => { appliedPerms.push(v) },
-      get: () => 'read-only',
+      current: () => 'read-only',
     },
   }
   process.env.DSH_HOME = join(tempHome, 'case-collab-stream-' + caseIndex++)
@@ -223,7 +224,8 @@ test('collab_stream 落库消息带 usageText，done 帧带 perm', async () => {
   const last = rows[rows.length - 1]
   assert.ok(last, '应落库一条合作对话')
   assert.equal(last.usageText, done[1].usageText)
-  assert.deepEqual(appliedPerms, ['read-only'])
+  // read-only 不是部署 preset，collabStream 不调用 pp.set，保持默认只读。
+  assert.deepEqual(appliedPerms, [])
 })
 test('status 在无 permissionPresets getter 时 applied 回落 read-only 且原字段不变', async () => {
   const { svc } = freshService()
@@ -883,7 +885,7 @@ test('collab_list 返回 collaborations 与 library', async () => {
   assert.ok(r.library.collaborations)
 })
 
-test('approval 纯函数：风险判定与权限只降级不升级', async () => {
+test('approval 纯函数：风险判定与权限升档/降级/回落', async () => {
   const { canProceed, riskPoint, choosePermission, isHighRisk } = await import('../lib/approval.mjs')
   assert.equal(isHighRisk('install'), true)
   assert.equal(isHighRisk('library'), false)
@@ -893,10 +895,11 @@ test('approval 纯函数：风险判定与权限只降级不升级', async () =>
   const approved = { decisions: [{ point: 'risk:install:x', pending: false, choice: 'approve', by: 'human' }] }
   assert.equal(canProceed(approved, 'install').ok, true)
   assert.equal(canProceed(approved, 'workspace').ok, false)
-  assert.deepEqual(choosePermission('read-only', 'danger-full-access'), { applied: 'read-only', upgraded: true })
-  assert.deepEqual(choosePermission('read-only', 'workspace-write'), { applied: 'read-only', upgraded: true })
+  assert.deepEqual(choosePermission('read-only', 'danger-full-access'), { applied: 'danger-full-access', upgraded: true })
+  assert.deepEqual(choosePermission('read-only', 'workspace-write'), { applied: 'workspace-write', upgraded: true })
   assert.deepEqual(choosePermission('read-only', 'read-only'), { applied: 'read-only', upgraded: false })
   assert.deepEqual(choosePermission('workspace-write', 'read-only'), { applied: 'read-only', upgraded: false })
+  assert.deepEqual(choosePermission('workspace-write', 'bogus'), { applied: 'workspace-write', upgraded: false })
 })
 
 test('全局 kelin.role 声明存在；本次合作角色经边界消息注入而非 meta', async () => {
@@ -917,7 +920,7 @@ test('全局 kelin.role 声明存在；本次合作角色经边界消息注入�
   const chatCtx = {
     get: name => name === 'agents' ? { create: async opts => { createMeta.push(opts && opts.meta); if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } } : ctx.get(name),
     on: () => () => {},
-    permissionPresets: { set: async (sess, name) => { appliedPerms.push(name) } },
+    permissionPresets: { names: ['workspace-write', 'danger-full-access'], set: async (sess, name) => { appliedPerms.push(name) }, current: () => 'workspace-write' },
   }
   process.env.DSH_HOME = join(tempHome, 'case-chat-' + caseIndex++)
   const chatSvc = createService(chatCtx)
@@ -929,17 +932,25 @@ test('全局 kelin.role 声明存在；本次合作角色经边界消息注入�
   assert.match(boundary.content[0].text, /分析师/)
   assert.match(boundary.content[0].text, /来自本次合作设置/)
   assert.ok(createMeta.every(m => !m || (!m.kelinRole && !m.role)), '角色不得写进 meta')
-  assert.deepEqual(appliedPerms, ['read-only'])
-  assert.ok(events.some(e => e[0] === 'waiting-human'), '升级请求应产生 waiting-human')
+  assert.deepEqual(appliedPerms, ['danger-full-access'])
+  assert.ok(!events.some(e => e[0] === 'waiting-human'), '已确认的选档升档不再发等待人工拍板帧')
   // 无图片：followup 内容与改造前一致，仍是单条纯文本块。
   assert.equal(followups.length, 1)
   assert.deepEqual(followups[0].content, [{ type: 'text', text: '你好' }])
   assert.ok(events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision' && e[1].imageCount === 0 && e[1].admitted === 0))
 })
 
-test('权限终态行为锁：读/写/危险/伪造四档逐一请求，实际恒为 read-only', async () => {
-  for (const wanted of ['read-only', 'workspace-write', 'danger-full-access', 'bogus']) {
+test('权限终态行为锁：四档逐一请求按 pp.names 映射生效，伪造档回落只读', async () => {
+  const presetCases = {
+    'read-only': { appliedPerms: [], donePerm: 'read-only', willSet: false },
+    'workspace-write': { appliedPerms: ['workspace-write'], donePerm: 'workspace-write', willSet: true },
+    'danger-full-access': { appliedPerms: ['danger-full-access'], donePerm: 'danger-full-access', willSet: true },
+    'bogus': { appliedPerms: [], donePerm: 'read-only', willSet: false },
+  }
+  for (const wanted of Object.keys(presetCases)) {
+    const expected = presetCases[wanted]
     const appliedPerms = []
+    let currentTier = 'read-only'
     const events = []
     const agent = {
       inject: () => {},
@@ -953,7 +964,7 @@ test('权限终态行为锁：读/写/危险/伪造四档逐一请求，实际�
         ? { create: async opts => { if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } }
         : ctx.get(name),
       on: () => () => {},
-      permissionPresets: { set: async (sess, name) => { appliedPerms.push(name) } },
+      permissionPresets: { names: ['workspace-write', 'danger-full-access'], set: async (sess, name) => { appliedPerms.push(name); currentTier = name }, current: sess => currentTier },
     }
     process.env.DSH_HOME = join(tempHome, 'case-perm-lock-' + caseIndex++)
     const chatSvc = createService(chatCtx)
@@ -962,11 +973,17 @@ test('权限终态行为锁：读/写/危险/伪造四档逐一请求，实际�
     await chatSvc.chatStream({ question: '你好', collabId: c.collab.id, diag: true, perm: wanted }, stream)
     const done = events.filter(e => e[0] === 'done')
     assert.equal(done.length, 1, wanted + ' 应恰好一条 done 帧')
-    assert.equal(done[0][1].perm, 'read-only', wanted + ' 的 done.perm 恒为 read-only')
-    assert.deepEqual(appliedPerms, ['read-only'], wanted + ' 的 appliedPerms 恒为 [read-only]')
-    const permDiag = events.find(e => e[0] === 'diag' && e[1] && e[1].at === 'permission')
-    assert.ok(permDiag, wanted + ' 应有 permission diag 帧')
-    assert.equal(permDiag[1].permApplied, 'read-only', wanted + ' 的 diag.permApplied 恒为 read-only')
+    assert.equal(done[0][1].perm, expected.donePerm, wanted + ' 的 done.perm 应为 ' + expected.donePerm)
+    assert.deepEqual(appliedPerms, expected.appliedPerms, wanted + ' 的 appliedPerms 应为 ' + JSON.stringify(expected.appliedPerms))
+    const permDiag = events.find(e => e[0] === 'diag' && e[1] && e[1].at === 'permission' && e[1].stage === 'plan')
+    assert.ok(permDiag, wanted + ' 应有 permission plan diag 帧')
+    assert.equal(permDiag[1].wantedPerm, wanted, wanted + ' 的 diag.wantedPerm 应回显请求档')
+    assert.equal(permDiag[1].permApplied, expected.donePerm, wanted + ' 的 diag.permApplied 应为 ' + expected.donePerm)
+    assert.equal(permDiag[1].willSet, expected.willSet, wanted + ' 的 diag.willSet 应与是否 set 一致')
+    const currentDiag = events.find(e => e[0] === 'diag' && e[1] && e[1].at === 'permission' && e[1].stage === 'current')
+    assert.ok(currentDiag, wanted + ' 应有 pp.current 回读验真帧')
+    assert.equal(currentDiag[1].readback, expected.donePerm, wanted + ' 的回读 readback 应等于生效档')
+    assert.equal(currentDiag[1].verified, true, wanted + ' 的回读 verified 应为真（set 后的真实档与声称一致）')
   }
 })
 

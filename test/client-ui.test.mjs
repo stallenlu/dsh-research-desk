@@ -154,7 +154,7 @@ test('boundary copy is plain-language, home surfaces next step, decision point h
   assert.ok(!src.includes('代码不会外传数据'), 'false security guarantee must be removed')
   assert.ok(!src.includes('由服务端从假设状态同步'), 'internal sync mechanism must be hidden')
   assert.ok(src.includes("PERM_LABELS[permMode] || '自定义'"), 'raw perm id fallback must be humanized')
-  assert.ok(src.includes('高风险动作（装包、发包等）仍需在决策区拍板'), 'permission copy must scope high-risk to decision zone')
+  assert.ok(src.includes('装包、发包、改工作区仍须在决策区拍板'), 'boundary copy must keep high-risk decision zone after selection takes effect')
   assert.ok(src.includes('const nextHint ='), 'next-step hint must be computed once')
   assert.ok(src.includes('科灵建议的下一步：'), 'home hero must surface next step in plain words')
   assert.ok(src.includes('让科灵把灵感长成选题'), 'home hero must have a single Kelin-facing primary action')
@@ -208,14 +208,15 @@ test('void-space run button ships lab code to the collab_run executor', () => {
 
 test('permission gate turns internal perm id into plain language (R4)', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  const js = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(host.includes("const PERM_LABELS = { 'read-only': '仅可查看', 'workspace-write': '工作区内修改', 'danger-full-access': '完全权限' }"), 'server-side PERM_LABELS missing')
-  const line = host.split('\n').find(l => l.includes('申请的权限档「'))
-  assert.ok(line, 'permission message not found')
-  assert.ok(line.includes('PERM_LABELS[wantedPerm]'), 'wantedPerm must go through the label map')
-  assert.ok(line.includes("PERM_LABELS['read-only']"), 'current tier must be plain language too')
-  assert.ok(!/wantedPerm\s*\+\s*'/.test(line), 'bare enum id must not be concatenated into human text')
-  assert.ok(line.includes("'自定义权限档'"), 'unknown tier fallback missing')
-  assert.ok(line.includes('decisionId') && line.includes('collabId: targetId'), 'boundary id fields must stay')
+  // 选档已可直接升档，旧的「申请权限档」人工拍板闸门按关2决策移除。
+  assert.ok(!host.includes('ensurePermissionDecision'), 'obsolete downgrade-only helper must be gone')
+  assert.ok(!host.includes('申请的权限档「'), 'obsolete manual-upgrade gate message must be gone')
+  // 用户可见的档位展示一律走 PERM_LABELS 白话，未知档有「自定义」兜底，不裸拼内部枚举 id。
+  assert.ok(js.includes("PERM_LABELS[permMode] || '自定义'"), 'shield indicator must use plain label with fallback')
+  assert.ok(js.includes('PERM_LABELS[v]'), 'settings options must use plain labels')
+  assert.ok(host.includes("note: '按已确认档生效"), 'status note must stay plain language, not raw perm id')
 })
 
 test('both agent stream handlers accumulate usage frames before done', () => {
@@ -592,16 +593,16 @@ test('后端路由竞态：404 自动重试一次并把失败真相留痕，不�
   assert.ok(src.includes('后端路由没挂上'), 'persistent 404 must show a plain-language cause')
   assert.ok(src.includes('baseURI'), 'diagnostic must capture the real page base')
 })
-test('装饰开关诚实化：识图已接入、协作已接入，权限标当前只读', () => {
+test('装饰开关诚实化：识图已接入、协作已接入，权限档标新会话生效', () => {
   assert.ok(src.includes("className: 'md-ctool md-ctool-vision' + (images.length") && !src.includes('识图·未接入'), 'vision button must be enabled and no longer labeled 未接入')
   assert.ok(src.includes('让科灵看这张图') && src.includes('选图片给科灵看'), 'vision tooltip must explain how to use real image recognition')
   assert.ok(src.includes("runCollabAction('collab_run'"), 'client must dispatch the real collab_run action')
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
   assert.ok(host.includes("case 'collab_run'") && host.includes('async collabRun('), 'host must register and implement the real collab_run chain')
   assert.ok(src.includes('md-settings-tip') && src.includes('交给科灵 · 到虚空验证'), 'target-button wording survives in the askcollab button title')
-  assert.ok(src.includes("' · 当前只读'"), 'perm row must show it currently runs read-only')
-  assert.ok(src.includes('不会立刻提权'), 'perm tip must say selecting a higher tier does not escalate')
-  assert.ok(src.includes('高风险动作（装包、发包等）仍需在决策区拍板'), 'perm copy must scope high-risk to decision zone')
+  assert.ok(src.includes("' · 新会话生效'"), 'perm row must show the selected tier takes effect for new sessions')
+  assert.ok(src.includes('新会话按所选档生效'), 'perm tip must say the selected tier takes effect')
+  assert.ok(src.includes('装包、发包、改工作区仍须在决策区拍板'), 'perm copy must scope high-risk to decision zone')
 })
 
 test('search-hit: 围栏内词也定位、单选自动跳、多条上一处/下一处导航', () => {
@@ -823,16 +824,16 @@ test('批次1 assistant footer: h(footer) 在正文下方，复制与用量仍�
   assert.ok(js.slice(cssFooterAt, cssFooterAt + 180).includes('justify-content: space-between'), 'footer must split left copy / right usage·time')
 })
 
-test('批次1 composer 工具行有可见盾牌 indicator，文案含「当前只读」且只进权限页', () => {
+test('批次1 composer 工具行有可见盾牌 indicator，文案含「新会话生效」且只进权限页', () => {
   const toolsAt = js.indexOf("h('div', { className: 'md-composer-tools'")
   assert.ok(toolsAt > 0, 'composer tools row must exist')
   const block = js.slice(toolsAt, toolsAt + 3600)
   assert.ok(block.includes("key: 'permind'"), 'shield/perm indicator must live in the composer tools row')
-  assert.ok(block.includes("' · 当前只读'"), 'indicator text must contain 当前只读')
+  assert.ok(block.includes("' · 新会话生效'"), 'indicator text must contain 新会话生效')
   assert.ok(block.includes("I({ name: 'shield', size: 12 })"), 'must reuse DSH dsh-im shield icon via ICONS, no new SVG')
-  assert.ok(block.includes("setSettingsPage('perm'); setSettingsPanelOpen(v => !v)"), 'click must open perm settings page, never elevate')
-  assert.ok(block.includes('不会立刻提权'), 'perm wording must preserve 选更高档只是记下偏好/不会立刻提权')
-  assert.ok(js.includes('选择新会话的默认权限模式。当前实际按只读运行：选更高档只是记下你的偏好，不会立刻提权，科灵每次调用工具仍要你在决策区点头；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
+  assert.ok(block.includes("setSettingsPage('perm'); setSettingsPanelOpen(v => !v)"), 'click must open perm settings page, never elevate directly')
+  assert.ok(block.includes('高风险动作仍需在决策区拍板'), 'perm wording must keep high-risk decision zone')
+  assert.ok(js.includes('选择新会话的默认权限模式；新会话按所选档生效，科灵调用工具按该档 sandbox 运行，不再只记偏好。高风险动作（装包、发包等）仍需在决策区拍板；完全权限不是免审批，需审批的动作按 never 语义一律拒绝。三档权限只管科灵调用工具，管不到实验里跑的子程序。'), 'settings perm tip must stay verbatim')
 })
 
 test('模型胶囊 onClick 进入两级菜单 menu 根页，加载模型并切换浮层', () => {
@@ -1478,7 +1479,7 @@ test('关3 对话轮次标尺：旧侧边刻度命名负向控制仍为零', () 
     .filter(k => src.includes(k))
   assert.deepEqual(banned, [], '不得复用被禁止的侧边刻度命名: ' + banned.join(','))
 })
-  // 关3 权限设置对齐 DSH 原生：完全权限必须过风险确认门；选档只写偏好，不造提权。
+  // 关3 权限设置对齐 DSH 原生：完全权限必须过风险确认门；选档写偏好，新会话按该档生效；高风险仍须拍板。
   test('关3 权限对齐：完全权限先风险确认，低档直选，取消/Esc/遮罩不改权限', () => {
     const tierLine = src.split('\n').find(l => l.includes("['read-only', 'workspace-write', 'danger-full-access'].map(v => h('button'"))
     assert.ok(tierLine, '三档权限按钮 map 必须还在')
@@ -1520,5 +1521,5 @@ test('关3 对话轮次标尺：旧侧边刻度命名负向控制仍为零', () 
     assert.ok(mountAt > dlgAt, '确认框与 themeDialog 同挂渲染根层，不在 dock 内')
 
     assert.ok(src.includes("const setPerm = v => { setPermMode(v); try { localStorage.setItem('rd.perm', v) } catch (e) {} }"), 'setPerm 仍只写本地偏好，不得伪造提权')
-    assert.ok(src.includes('选择新会话的默认权限模式。当前实际按只读运行'), '权限页说明改为 DSH 原生语义开头')
+    assert.ok(src.includes('选择新会话的默认权限模式；新会话按所选档生效'), '权限页说明改为新会话按所选档生效')
   })
