@@ -975,20 +975,21 @@ test('image 页渲染订阅生图工具可用性小字，且提示诚实', () =>
 })
 
 // ---- 关3：两个设置入口统一到单一面板渲染源（齿轮 → 科灵栏设置面板） ----
-test('齿轮入口重定向到科灵栏设置面板 root，并解除 dockOpen 硬约束', () => {
+test('齿轮入口在根层开独立设置对话框，不强制展开科灵栏', () => {
   const gear = src.split('\n').find(l => l.includes("key: 'gear', icon: 'gear', label: '设置'"))
   assert.ok(gear, '顶栏齿轮按钮缺失')
-  assert.ok(gear.includes('setDockOpen(true)'), '齿轮必须先打开科灵栏，解除 settingsPanel 的 dockOpen 硬约束')
+  assert.ok(!gear.includes('setDockOpen'), '齿轮不得再强制展开科灵栏（过程可见：改设置不打断工作区）')
   assert.ok(gear.includes("setSettingsPage('root')"), '齿轮必须把面板复位到 root 页')
-  assert.ok(gear.includes('setSettingsPanelOpen(true)'), '齿轮必须显式打开设置面板')
-  assert.ok(gear.includes('setShowSettings') === false, '齿轮不得再指向已删除的 settingsDialog')
+  assert.ok(gear.includes('setSettingsDialogOpen(true)'), '齿轮必须打开独立设置对话框')
+  assert.ok(!gear.includes('setSettingsPanelOpen'), '齿轮不得再就地打开 dock 内浮层')
+  assert.ok(gear.includes("setSettingsPage('root')"), '齿轮必须把设置复位到 root 页')
 })
 
-test('旧 settingsDialog 死代码源码级不存在（state/定义/挂载三处）', () => {
+test('旧 showSettings 死代码已清除，设置对话框改走复用 Dialog 的 settingsDialog', () => {
   assert.ok(!src.includes('showSettings'), 'showSettings 状态残留')
   assert.ok(!src.includes('setShowSettings'), 'setShowSettings 引用残留')
-  assert.ok(!src.includes('settingsDialog'), 'settingsDialog 定义或挂载残留')
-  assert.ok(!src.includes("key: 'setdlg'"), '旧设置对话框 key 残留')
+  assert.ok(src.includes('const settingsDialog = settingsDialogOpen ?'), 'settingsDialog 须用现成 Dialog 定义')
+  assert.ok(src.includes("key: 'setdlg'"), '设置对话框 key 必须存在')
 })
 
 test('other 子页存在并承接 30 项 settingRows 单一渲染', () => {
@@ -1023,4 +1024,58 @@ test('image.* 字段仅在 image 子页单一渲染，不再与 other 页重复'
   const otherAt = src.indexOf("settingsPage === 'other'")
   const other = src.slice(otherAt, src.indexOf("key: 'effort'", otherAt))
   assert.ok(!other.includes("r.key.indexOf('image.')"), 'other 页不得重复渲染 image.* 字段')
+})
+// ---- 齿轮设置不再强制展开科灵 dock：独立 Dialog + 内容单一渲染源 ----
+test('齿轮 onClick 不再 setDockOpen，改为在根层开独立设置对话框', () => {
+  const gear = src.split('\n').find(l => l.includes("key: 'gear', icon: 'gear', label: '设置'"))
+  assert.ok(gear, '顶栏齿轮按钮缺失')
+  assert.ok(!gear.includes('setDockOpen'), '齿轮不得再强制展开科灵栏（过程可见：改设置不打断工作区）')
+  assert.ok(gear.includes("setSettingsPage('root')"), '齿轮须把设置复位到 root 页')
+  assert.ok(gear.includes('setSettingsDialogOpen(true)'), '齿轮须打开独立设置对话框')
+})
+
+test('settingsBody 单一渲染源：dock 内浮层与根层 Dialog 两处都调用 settingsBody()', () => {
+  assert.ok(src.includes('const settingsBody = () => ('), 'settingsBody 闭包定义缺失')
+  const calls = (src.match(/settingsBody\(\)/g) || []).length
+  assert.equal(calls, 2, 'settingsBody() 须恰好被浮层与 Dialog 两处复用，实际=' + calls)
+  assert.ok(src.includes("const settingsPanel = (settingsPanelOpen && dockOpen) ? h('div', { className: 'md-settings-pop', key: 'setpop' }, settingsBody()) : null"), '浮层须用 settingsBody() 替换原内联表达式')
+  assert.ok(src.includes('}, settingsBody()) : null'), 'Dialog 须用 settingsBody() 作为 children')
+})
+
+test('settingsDialog 挂渲染根层、不受 dockOpen 约束，复用现有 Dialog/md-dialog', () => {
+  assert.ok(src.includes("const settingsDialog = settingsDialogOpen ? h(Dialog, { key: 'setdlg', title: '设置', onClose: () => setSettingsDialogOpen(false), width: 560 }, settingsBody()) : null"), 'settingsDialog 须复用 Dialog 组件')
+  const defAt = src.indexOf('const settingsDialog = settingsDialogOpen ?')
+  const defLine = src.slice(defAt, src.indexOf('\n', defAt))
+  assert.ok(!defLine.includes('dockOpen'), 'dialog 定义不得依赖 dockOpen')
+  const themeAt = src.indexOf('        themeDialog,')
+  const mountAt = src.indexOf('        settingsDialog,', themeAt)
+  assert.ok(themeAt > 0 && mountAt > themeAt, 'settingsDialog 须挂在 themeDialog 之后的渲染根层')
+  assert.ok(src.includes('function Dialog(props)') && src.includes("className: 'md-dialog-mask'") && src.includes("className: 'md-dialog-head'"), '须复用现成 Dialog 与 md-dialog 系列 class')
+})
+
+test('closeSettings 同时关闭浮层与对话框；内容块关闭动作改造后仍在', () => {
+  assert.ok(src.includes('const closeSettings = () => { setSettingsPanelOpen(false); setSettingsDialogOpen(false) }'), 'closeSettings 须同时调两个 setter')
+  const useAt = src.indexOf('const closeSettings = () =>')
+  const panelAt = src.indexOf('const settingsPanel = (settingsPanelOpen')
+  const block = src.slice(useAt, panelAt)
+  assert.equal((block.match(/closeSettings\(\)/g) || []).length, 5, '内容块 5 处关闭动作须改调 closeSettings()')
+  assert.ok(!block.slice(block.indexOf('\n')).includes('setSettingsPanelOpen(false)'), '内容块内不得残留直接 setSettingsPanelOpen(false)（closeSettings 定义本身除外）')
+  const effAt = src.indexOf('if (!settingsPanelOpen) return')
+  const effBlock = src.slice(effAt, src.indexOf('}, [settingsPanelOpen])', effAt))
+  assert.equal((effBlock.match(/setSettingsPanelOpen\(false\)/g) || []).length, 2, 'useEffect 两处关闭须保持原样')
+  for (const t of ['模型', '推理等级', '权限模式', '生图配置', '智能体团队协作', '其他与界面偏好', '跟随默认', '推理等级越高，回答越审慎，耗时也更长。']) {
+    assert.ok(src.includes(t), '设置项文案丢失：' + t)
+  }
+})
+
+test('齿轮改造新增片段零新增硬编码 hex', () => {
+  const pick = (marker, len) => { const i = src.indexOf(marker); return i < 0 ? '' : src.slice(i, i + len) }
+  const regions = [
+    pick('const [settingsDialogOpen', 120),
+    pick('const closeSettings = () =>', 120),
+    pick('const settingsDialog = settingsDialogOpen ?', 260),
+    pick('const settingsPanel = (settingsPanelOpen && dockOpen)', 180),
+    src.split('\n').find(l => l.includes("key: 'gear', icon: 'gear', label: '设置'")) || '',
+  ].join('\n')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(regions), '本次新增片段不得引入硬编码 hex')
 })
