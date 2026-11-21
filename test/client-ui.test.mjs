@@ -9,6 +9,13 @@ import { dirname, join } from 'node:path'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const src = await readFile(join(root, 'lib', 'client.js'), 'utf8')
 
+// P0-1：indexOf 取值先判 !==-1，slice 两端点先断言有效；禁止 -1 参与比较/切片造成假通过。
+const mustFind = (text, marker, label, from = 0) => {
+  const i = text.indexOf(marker, from)
+  assert.ok(i !== -1, (label || 'marker') + ' must exist: ' + marker)
+  return i
+}
+
 test('image settings page exists with plain-language key/billing copy', () => {
   assert.ok(src.includes("settingsPage === 'image'"), 'image settings page branch must exist')
   assert.ok(src.includes('生图配置'), 'image settings entry label missing')
@@ -237,7 +244,7 @@ test('both done frames carry server-composed usageText; elapsed always, tokens o
 
 test('chat and collab consumers store the precomputed usageText and render it', () => {
   assert.ok(src.includes('reasoningAcc || toolTrace.length || ev.usageText'), 'chat done must handle ev.usageText')
-  const at = src.indexOf('reasoningAcc || toolTrace.length || ev.usageText')
+  const at = mustFind(src, 'reasoningAcc || toolTrace.length || ev.usageText', 'usageText store site')
   assert.ok(src.slice(at, at + 700).includes('usageText: String(ev.usageText)'), 'chat message must store server value verbatim')
   const collabDone = src.split('\n').find(l => l.includes("else if (ev.type === 'done')") && l.includes('ev.collabId'))
   assert.ok(collabDone && collabDone.includes('ev.usageText'), 'collab done must surface usageText')
@@ -255,7 +262,7 @@ test('per-answer copy button reuses clipboard with execCommand fallback, no is-p
   assert.ok(renderLine.includes('navigator.clipboard.writeText(text)'), 'clipboard API path missing')
   assert.ok(renderLine.includes("document.execCommand('copy')"), 'execCommand fallback missing for insecure context')
   assert.ok(renderLine.includes("notify('已复制回答')"), 'success feedback missing')
-  const at = renderLine.indexOf("label: '复制这条回答'")
+  const at = mustFind(renderLine, "label: '复制这条回答'", 'copy label')
   assert.ok(!renderLine.slice(at, at + 1100).includes('is-primary'), 'dock icon button must not be is-primary (R3)')
   assert.ok(src.includes('function F(props)'), 'existing F helper must be reused')
   assert.ok(src.includes("copy:'M9 9h10v11H9zM5 15V4h10'"), 'existing copy icon must be reused')
@@ -263,9 +270,11 @@ test('per-answer copy button reuses clipboard with execCommand fallback, no is-p
 test("dock collapse button aligns to top-right of title", () => {
   assert.ok(src.includes(".md-root .md-dock-head h2 + .md-icon-btn { margin-left: auto; }"), "dock close button must be pushed to right edge")
   assert.ok(src.includes(".md-dock-head { flex: none; display: flex; align-items: center;"), "dock head must be flex row with vertical centering")
-  const dhAt = src.indexOf("'data-window-drag': '', key: 'dh'")
+  const dhAt = mustFind(src, "'data-window-drag': '', key: 'dh'", 'dock drag header')
   const region = src.slice(dhAt, dhAt + 400)
-  assert.ok(region.indexOf("'科灵'") < region.indexOf("label: '收起对话'"), "title before close button")
+  const titleAt = mustFind(region, "'科灵'", 'dock title')
+  const closeAt = mustFind(region, "label: '收起对话'", 'dock close label')
+  assert.ok(titleAt < closeAt, "title before close button")
 })
 
 test('set_draft_status is fully wired server-side (ACTIONS/method/whitelist/schema)', () => {
@@ -282,7 +291,7 @@ test('set_draft_status is fully wired server-side (ACTIONS/method/whitelist/sche
   assert.ok(host.includes("store.mutate('更新成稿状态'"), 'status must be persisted through store.mutate')
   assert.ok(host.includes('DRAFT_STATUS.includes(status)'), 'method must validate status against whitelist')
   assert.ok(host.includes("status: row.status || 'draft'"), 'libraryView must surface persisted draft status')
-  const schema = host.slice(host.indexOf('const PARAMETERS = {'), host.indexOf('const DESCRIPTION = ['))
+  const schema = host.slice(mustFind(host, 'const PARAMETERS = {', 'PARAMETERS'), mustFind(host, 'const DESCRIPTION = [', 'DESCRIPTION'))
   assert.ok(schema.includes("id: { type: 'string'"), 'schema must expose id')
   const statusSchema = schema.split('\n').find(l => l.trim().startsWith('status: { type: \'string\''))
   assert.ok(statusSchema, 'schema must expose status')
@@ -357,7 +366,7 @@ test('human approval resumes collab only when approve clears all pending decisio
 })
 
 test('schedule hero has bottom spacing before calendar area', () => {
-  const svAt = src.indexOf("const scheduleView = h('div', { className: 'md-page'")
+  const svAt = mustFind(src, "const scheduleView = h('div', { className: 'md-page'", 'scheduleView')
   const heroLine = src.slice(svAt, svAt + 400).split('\n').find(l => l.includes("key: 'hero'"))
   assert.ok(heroLine && heroLine.includes('marginBottom: 24'), 'schedule hero must have bottom margin so it does not touch calendar area')
 })
@@ -401,7 +410,7 @@ test('chat sessions: server actions, mirror sync, and dock session bar are wired
 })
 
 test('chat sessions bar matches dock theme, has visible labels and distinguishable titles', () => {
-  const bar = src.slice(src.indexOf('const CHATBAR_CSS = ['), src.indexOf('function injectStyles'))
+  const bar = src.slice(mustFind(src, 'const CHATBAR_CSS = [', 'CHATBAR_CSS'), mustFind(src, 'function injectStyles', 'injectStyles'))
   assert.ok(bar.includes('var(--card)') && bar.includes('var(--ink)'), 'chatbar must use .md-root theme tokens (--card/--ink)')
   assert.ok(!/#(fff|f1f5f9|e2e8f0|cbd5e1|e4eaf2)/i.test(bar), 'chatbar must not hardcode light color fallbacks')
   assert.ok(!bar.includes('--dsw-alias-'), 'chatbar must not bypass dock theme via --dsw-alias variables')
@@ -413,7 +422,7 @@ test('chat sessions bar matches dock theme, has visible labels and distinguishab
 })
 
 test('assistant talk language: explicit choice wins; host档 truly follows DSH locale bridge', () => {
-  const eff = src.slice(src.indexOf('function effectiveLang('), src.indexOf('function isIdentityChat('))
+  const eff = src.slice(mustFind(src, 'function effectiveLang(', 'effectiveLang'), mustFind(src, 'function isIdentityChat(', 'isIdentityChat'))
   assert.ok(eff.includes("if (localeId === 'en') return 'en'"), 'explicit English choice must still be honored')
   assert.ok(eff.includes("if (localeId === 'zh') return 'zh'"), 'explicit Chinese choice must be honored')
   assert.ok(eff.includes("return hostLang === 'en' ? 'en' : 'zh'"), 'host档 must follow the DSH host language, with a safe Chinese fallback')
@@ -444,7 +453,7 @@ test('L3 找历史入口只发 chat_search，results 原样渲染并可切换会
 })
 
 test('L3 会话卡与搜索样式仍走语义 token，无浅色兜底 HEX', () => {
-  const bar = src.slice(src.indexOf('const CHATBAR_CSS = ['), src.indexOf('function injectStyles'))
+  const bar = src.slice(mustFind(src, 'const CHATBAR_CSS = [', 'CHATBAR_CSS'), mustFind(src, 'function injectStyles', 'injectStyles'))
   assert.ok(bar.includes('.md-chatsearch'), 'search panel CSS must live in CHATBAR_CSS')
   assert.ok(bar.includes('color-mix(in srgb, var(--accent)'), 'outcome pill colors must derive from theme tokens')
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(bar), 'new chatbar CSS must not introduce any hardcoded HEX color')
@@ -456,7 +465,8 @@ test('L1 会话历史三字段由服务端现算并在各处落盘/透出/可搜
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
   // 1) enrichChat 为导出纯函数，含中文注释
   assert.ok(desk.includes('export function enrichChat(row)'), 'desk must export enrichChat(row)')
-  assert.ok(/\/\*|\/\//.test(desk.slice(desk.indexOf('export function enrichChat'), desk.indexOf('export function enrichChat') + 200)), 'enrichChat must carry a comment')
+  const enrichAt = mustFind(desk, 'export function enrichChat', 'enrichChat comment site')
+  assert.ok(/\/\*|\/\//.test(desk.slice(enrichAt, enrichAt + 200)), 'enrichChat must carry a comment')
   // 2) syncActiveChat 写消息后调用 enrichChat(row)
   assert.ok(desk.includes('  enrichChat(row)\n'), 'syncActiveChat must call enrichChat(row) after messages normalized')
   // 3) migrate 惰性回填
@@ -474,7 +484,7 @@ test('L1 会话历史三字段由服务端现算并在各处落盘/透出/可搜
 
 test('L2 跨会话相关历史注入：服务端算人话、跳过当前会话、diag 自证钩子', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
-  const helperZone = host.slice(host.indexOf('// L2 跨会话检索的停用词'), host.indexOf('function memoryBlock('))
+  const helperZone = host.slice(mustFind(host, '// L2 跨会话检索的停用词', 'L2 stopword block'), mustFind(host, 'function memoryBlock(', 'memoryBlock'))
   // 1) 纯函数辅助：关键词抽取 + 相关度打分，带中文注释与停用词
   assert.ok(/function questionKeywords\(/.test(helperZone), 'must have deterministic keyword extractor')
   assert.ok(/function chatRelevanceScore\(/.test(helperZone), 'must have relevance scorer')
@@ -482,7 +492,7 @@ test('L2 跨会话相关历史注入：服务端算人话、跳过当前会话�
   assert.ok(/KEYWORD_STOP_EN/.test(helperZone) && /KEYWORD_STOP_ZH/.test(helperZone), 'stopword sets for both languages must exist')
   assert.ok(/时间衰减/.test(helperZone) && /0\.6/.test(helperZone), 'time decay with old-value floor must exist')
   // 2) memoryBlock 本体：消费当前问题、遍历 state.chats、跳过 activeChatId、注入人话段
-  const mb = host.slice(host.indexOf('function memoryBlock('), host.indexOf('function extractText('))
+  const mb = host.slice(mustFind(host, 'function memoryBlock(', 'memoryBlock'), mustFind(host, 'function extractText(', 'extractText'))
   assert.ok(/args\.question|args\.query/.test(mb), 'memoryBlock must consume the current question')
   assert.ok(/state\.chats/.test(mb), 'memoryBlock must scan state.chats across sessions')
   assert.ok(/c\.id !== state\.activeChatId/.test(mb), 'must skip the active session to avoid duplication')
@@ -500,7 +510,9 @@ test('L2 跨会话相关历史注入：服务端算人话、跳过当前会话�
   }
   assert.ok(/statsOut\.historySessions/.test(mb) && /statsOut\.historyChars/.test(mb), 'memoryBlock must fill diag stats')
   // 5) 未引入客户端断言，也不碰 client.js（L2 块只读 host 源码，不引用 client.js 源变量 src）
-  const l2 = host.slice(host.indexOf("test('L2 跨会话相关历史注入"))
+  const l2At = host.indexOf('// L2 跨会话检索的停用词')
+  assert.ok(l2At !== -1, 'L2 stopword block must exist')
+  const l2 = host.slice(l2At)
   assert.ok(!l2.includes('src.includes') && !l2.includes('client.js'), 'L2 block must not add client.js assertions')
 })
 
@@ -533,20 +545,20 @@ test('L4 画像空数组可删净：客户端不本地补回缺省值', () => {
 })
 
 test('L4 画像 UI 样式走语义 token，无硬编码 HEX / --dsw-alias', () => {
-  const css = src.slice(src.indexOf('const SMARTDESK_CSS = ['), src.indexOf('function call('))
+  const css = src.slice(mustFind(src, 'const SMARTDESK_CSS = [', 'SMARTDESK_CSS'), mustFind(src, 'function call(', 'call function'))
   assert.ok(css.includes('.md-desk-profile-edit') && css.includes('.md-profile-chip-x'), 'profile edit styles live in SMARTDESK_CSS')
   assert.ok(css.includes('color-mix(in srgb,var(--primary)'), 'chip colors derive from theme tokens')
-  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.slice(css.indexOf('/* L4 画像蒸馏与纠错 */'))), 'new L4 CSS must not introduce hardcoded HEX')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.slice(mustFind(css, '/* L4 画像蒸馏与纠错 */', 'L4 CSS marker'))), 'new L4 CSS must not introduce hardcoded HEX')
   assert.ok(!css.includes('--dsw-alias-'), 'must not bypass dock theme tokens')
 })
 test('C+E 语义召回：粗召回补位 + 同义词表 + 一行候选清单交给 LLM 自判', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
-  const helperZone = host.slice(host.indexOf('// L2 跨会话检索的停用词'), host.indexOf('function memoryBlock('))
+  const helperZone = host.slice(mustFind(host, '// L2 跨会话检索的停用词', 'L2 stopword block'), mustFind(host, 'function memoryBlock(', 'memoryBlock'))
   assert.ok(/KEYWORD_SYNONYMS/.test(helperZone) && /function expandSynonyms\(/.test(helperZone), 'must have research synonym table + expander')
   assert.ok(/代号/.test(helperZone) && /别名/.test(helperZone) && /命名/.test(helperZone), 'synonyms must cover alias/naming relations')
   assert.ok(!/咖啡|作息|手冲/.test(helperZone), 'synonym table must NOT include life words, to keep semantic test falsifiable')
   assert.ok(/C 方案/.test(helperZone) && /HISTORY_CANDIDATE_CAP = 12/.test(helperZone), 'must have coarse-recall candidate cap')
-  const mb = host.slice(host.indexOf('function memoryBlock('), host.indexOf('function extractText('))
+  const mb = host.slice(mustFind(host, 'function memoryBlock(', 'memoryBlock'), mustFind(host, 'function extractText(', 'extractText'))
   assert.ok(/expandSynonyms\(questionKeywords\(question\)\)/.test(mb), 'keywords must be expanded through synonym table')
   assert.ok(/\.slice\(0, HISTORY_CANDIDATE_CAP\)/.test(mb), 'coarse recall must cap at candidate limit')
   assert.ok(/picked\.length < HISTORY_CANDIDATE_CAP/.test(mb) && /byRecent/.test(mb), 'zero-hit sessions must be backfilled by recency')
@@ -583,7 +595,9 @@ test('后端路由竞态：404 自动重试一次并把失败真相留痕，不�
 test('装饰开关诚实化：识图已接入、协作已接入，权限标当前只读', () => {
   assert.ok(src.includes("className: 'md-ctool md-ctool-vision' + (images.length") && !src.includes('识图·未接入'), 'vision button must be enabled and no longer labeled 未接入')
   assert.ok(src.includes('让科灵看这张图') && src.includes('选图片给科灵看'), 'vision tooltip must explain how to use real image recognition')
-  assert.ok(src.includes('智能体团队协作') && src.includes('已接入'), 'teamCollab must be shown as connected (real capability)')
+  assert.ok(src.includes("runCollabAction('collab_run'"), 'client must dispatch the real collab_run action')
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  assert.ok(host.includes("case 'collab_run'") && host.includes('async collabRun('), 'host must register and implement the real collab_run chain')
   assert.ok(src.includes('md-settings-tip') && src.includes('交给科灵 · 到虚空验证'), 'target-button wording survives in the askcollab button title')
   assert.ok(src.includes("' · 当前只读'"), 'perm row must show it currently runs read-only')
   assert.ok(src.includes('不会立刻提权'), 'perm tip must say selecting a higher tier does not escalate')
@@ -638,10 +652,9 @@ test('会话归属：发送前把服务端 activeChatId 对齐到界面显示的
 
 // 成稿页原生适配：媒体视频语义 → 科研写作语义（保留双栏/Bento/hero/进度/chips 骨架）
 test('成稿页 studioView 已替换为科研写作语义，媒体视频语义清零', () => {
-  const start = src.indexOf("const studioView = h('div'")
-  assert.ok(start > 0, 'studioView must exist')
-  const cssAt = src.indexOf('const CHAT_MD_CSS', start)
-  const studio = src.slice(start, cssAt > 0 ? cssAt : start + 6000)
+  const start = mustFind(src, "const studioView = h('div'", 'studioView')
+  const cssAt = mustFind(src, 'const CHAT_MD_CSS', 'CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt)
   for (const stale of ['分镜头脚本', '约 15 秒', '生成图片', '脚本骨架', '风格 · 默认', '一键成稿', '正在成稿']) {
     assert.ok(!studio.includes(stale), 'studioView must not contain stale media/video copy: ' + stale)
   }
@@ -652,9 +665,9 @@ test('成稿页 studioView 已替换为科研写作语义，媒体视频语义�
 })
 
 test('成稿页体裁段是无障碍 radiogroup，主行动唯一且为 is-primary', () => {
-  const start = src.indexOf("const studioView = h('div'")
-  const cssAt = src.indexOf('const CHAT_MD_CSS', start)
-  const studio = src.slice(start, cssAt > 0 ? cssAt : start + 6000)
+  const start = mustFind(src, "const studioView = h('div'", 'studioView')
+  const cssAt = mustFind(src, 'const CHAT_MD_CSS', 'CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt)
   assert.ok(studio.includes("className: 'md-seg', role: 'radiogroup', 'aria-label': '成稿体裁'"), 'md-seg must be an accessible radiogroup labeled 成稿体裁')
   assert.equal((studio.match(/role: 'radio'/g) || []).length, 2, 'both genre buttons must be role=radio')
   assert.equal((studio.match(/'aria-checked':/g) || []).length, 2, 'both genre buttons must expose aria-checked')
@@ -678,7 +691,7 @@ test('粘贴入口：textarea 有 onPaste，仅剪贴板带文件时拦截，纯
   assert.ok(src.includes("const clipboardFiles = dataTransfer => {"), 'must extract File entries through a dedicated clipboard reader')
   assert.ok(src.includes("if (!it || it.kind !== 'file') continue"), 'non-file clipboard items (text/html) must be skipped')
   assert.ok(src.includes("if (!out.length && dataTransfer.files && dataTransfer.files.length)"), 'must fall back to dataTransfer.files')
-  const handler = src.slice(src.indexOf("const onComposerPaste = e => {"), src.indexOf('const removeImage = id =>'))
+  const handler = src.slice(mustFind(src, "const onComposerPaste = e => {", 'onComposerPaste'), mustFind(src, 'const removeImage = id =>', 'removeImage'))
   const returnAt = handler.indexOf('if (!files.length) return')
   const preventAt = handler.indexOf('e.preventDefault()')
   assert.ok(returnAt > 0 && preventAt > returnAt, 'plain-text paste must NOT be prevented: early return comes before preventDefault')
@@ -697,11 +710,11 @@ test('粘贴分流：图片进识图队列、文档进资料登记、不支持�
 })
 
 test('附件条位置：图片缩略图与文件卡片都在输入框上方（对齐原生 DOM 顺序）', () => {
-  const formAt = src.indexOf("h('form', { className: 'md-composer md-composer-native'")
-  const textareaAt = src.indexOf("h('textarea', { key: 'ta'", formAt)
-  const previewsAt = src.indexOf("h('div', { className: 'md-vision-previews'", formAt)
-  const fileCardAt = src.indexOf("className: 'md-file-card'", formAt)
-  assert.ok(formAt > 0 && textareaAt > formAt, 'composer form and textarea must exist')
+  const formAt = mustFind(src, "h('form', { className: 'md-composer md-composer-native'", 'composer form')
+  const textareaAt = mustFind(src, "h('textarea', { key: 'ta'", 'composer textarea', formAt)
+  const previewsAt = mustFind(src, "h('div', { className: 'md-vision-previews'", 'vision previews rail', formAt)
+  const fileCardAt = mustFind(src, "className: 'md-file-card'", 'file card', formAt)
+  assert.ok(textareaAt > formAt, 'composer form and textarea must exist')
   assert.ok(previewsAt > formAt && previewsAt < textareaAt, 'attachment rail must be rendered BEFORE the textarea, not below it')
   assert.ok(fileCardAt > previewsAt && fileCardAt < textareaAt, 'file cards must live inside that rail, above the textarea')
   assert.ok(src.includes("(images.length || rdDocs.some(x => x.composerPending))"), 'rail must show only when something is pending')
@@ -725,7 +738,7 @@ test('文件附件随消息发送：pendingFiles 字节入 payload，done 清理
   assert.ok(src.includes("resolve(i >= 0 ? s.slice(i + 1) : s)"), 'dataURL prefix must be stripped before staging')
   assert.ok(src.includes("files: (pendingFiles || []).map(x => ({ name: x.name, data: x.data })),"), 'chat_stream payload must carry staged file bytes')
   assert.ok(src.includes("setPendingFiles([])"), 'done must clear staged bytes so they are sent once')
-  const payloadBlock = src.slice(src.indexOf('files: (pendingFiles'), src.indexOf('rules: (rules'))
+  const payloadBlock = src.slice(mustFind(src, 'files: (pendingFiles', 'pendingFiles payload'), mustFind(src, 'rules: (rules', 'rules payload'))
   assert.ok(!payloadBlock.includes("'data:'"), 'file payload must never carry a data: prefix')
   assert.ok(src.includes("onChange: e => { intakeFiles(e.target.files); e.target.value = '' } }),"), 'main file input must route through intakeFiles so selected files show above the composer')
 })
@@ -735,7 +748,7 @@ test('识图 payload：发送时读出的 data 是纯 base64，不带 data: 前�
   assert.ok(src.includes("resolve(comma >= 0 ? raw.slice(comma + 1) : '')"), 'must strip the dataURL prefix before sending')
   assert.ok(src.includes("const imagePayload = await Promise.all((images || []).map(async x => ({ name: x.name, mediaType: x.mediaType, data: await readImageBase64(x) })))"), 'send must await real bytes before building payload')
   assert.ok(src.includes("images: imagePayload,"), 'payload must carry the resolved image bytes')
-  const block = src.slice(src.indexOf('const imagePayload ='), src.indexOf('images: imagePayload,'))
+  const block = src.slice(mustFind(src, 'const imagePayload =', 'imagePayload build'), mustFind(src, 'images: imagePayload,', 'imagePayload send'))
   assert.ok(!block.includes("'data:'"), 'image payload must never contain a data: prefix')
 })
 
@@ -744,18 +757,18 @@ test('文件卡片：扩展徽标+文件名+大小，复用语义 class 且不�
   assert.ok(src.includes("String(doc.type || 'file').toUpperCase().slice(0, 4)"), 'badge must show the uppercase extension')
   assert.ok(src.includes("className: 'md-file-name'"), 'card must show the file name')
   assert.ok(src.includes("className: 'md-file-size'"), 'card must show the file size')
-  const cssStart = src.indexOf("'.md-file-card{")
-  assert.ok(cssStart > 0, 'file-card CSS must be defined')
-  const cssEndName = src.indexOf("'.md-file-size{", cssStart)
-  const cssEnd = src.indexOf("',\n", cssEndName)
+  const cssStart = mustFind(src, "'.md-file-card{", 'file-card CSS')
+  const cssEndName = mustFind(src, "'.md-file-size{", 'file-size CSS', cssStart)
+  const cssEnd = mustFind(src, "',\n", 'file-card CSS end', cssEndName)
+  assert.ok(cssEnd > cssStart, 'file-card CSS end must come after its start')
   const css = src.slice(cssStart, cssEnd)
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css), 'new card CSS must use semantic tokens, not hardcoded hex')
 })
 
 test('靠左修正：.md-composer-native 覆盖基类 align-items:flex-end，附件/输入条左对齐', () => {
-  const at = src.indexOf('.md-composer-native{')
-  assert.ok(at > 0, 'native composer rule must exist')
-  const end = src.indexOf('}', at)
+  const at = mustFind(src, '.md-composer-native{', 'native composer rule')
+  const end = mustFind(src, '}', 'native composer rule end', at)
+  assert.ok(end > at, 'rule end must come after its start')
   const rule = src.slice(at, end)
   assert.ok(rule.includes('align-items:stretch'), 'column-direction cross axis is horizontal: must override inherited align-items:flex-end with stretch so the rail/textarea/tools align left')
   assert.ok(rule.includes('flex-direction:column'), 'native composer must remain a column flex layout')
@@ -766,15 +779,16 @@ test('靠左修正：.md-composer-native 覆盖基类 align-items:flex-end，附
 const js = src
 
 test('批次1 assistant footer: h(footer) 在正文下方，复制与用量仍在，m.at 时渲染 md-msg-time', () => {
-  const aiAt = js.indexOf("h('div', { className: 'md-msg-ai', key: 'ai' }")
-  assert.ok(aiAt > 0, 'assistant md-msg-ai block must exist')
-  const block = js.slice(aiAt, js.indexOf('\n', aiAt))
-  const footerAt = block.indexOf("h('footer', { key: 'foot' },")
-  assert.ok(footerAt > 0, 'assistant message must render a real h(footer)')
-  const bodyAt = block.indexOf('renderRichText(p.text)')
-  assert.ok(bodyAt > 0 && bodyAt < footerAt, 'footer must sit after the splitFences body, below the message')
-  assert.ok(block.indexOf("key: 'copy'") > footerAt, 'copy F must be moved into the footer')
-  assert.ok(block.indexOf("key: 'usage'") > footerAt, 'usage div.md-muted must be moved into the footer')
+  const aiAt = mustFind(js, "h('div', { className: 'md-msg-ai', key: 'ai' }", 'assistant md-msg-ai block')
+  const lineEnd = mustFind(js, '\n', 'assistant message line end', aiAt)
+  const block = js.slice(aiAt, lineEnd)
+  const footerAt = mustFind(block, "h('footer', { key: 'foot' },", 'assistant footer')
+  const bodyAt = mustFind(block, 'renderRichText(p.text)', 'assistant body')
+  assert.ok(bodyAt < footerAt, 'footer must sit after the splitFences body, below the message')
+  const copyAt = mustFind(block, "key: 'copy'", 'footer copy F')
+  const usageAt = mustFind(block, "key: 'usage'", 'footer usage')
+  assert.ok(copyAt > footerAt, 'copy F must be moved into the footer')
+  assert.ok(usageAt > footerAt, 'usage div.md-muted must be moved into the footer')
   assert.ok(block.includes("m.at ? h('span', { className: 'md-msg-time', key: 'time' }, chatRelativeTime(m.at)) : null"), 'md-msg-time must render only when m.at exists')
   assert.ok(block.includes("key: 'reason'") && block.includes("key: 'tooltrace'"), 'reasoning/toolTrace details must remain')
   assert.ok(block.includes('navigator.clipboard.writeText(text)') && block.includes("document.execCommand('copy')"), 'clipboard+textarea fallback logic must remain untouched')
@@ -789,7 +803,7 @@ test('批次1 composer 工具行有可见盾牌 indicator，文案含「当前�
   const block = js.slice(toolsAt, toolsAt + 3600)
   assert.ok(block.includes("key: 'permind'"), 'shield/perm indicator must live in the composer tools row')
   assert.ok(block.includes("' · 当前只读'"), 'indicator text must contain 当前只读')
-  assert.ok(block.includes("I({ name: 'gear', size: 12 })"), 'must reuse existing gear icon, no new SVG')
+  assert.ok(block.includes("I({ name: 'shield', size: 12 })"), 'must reuse DSH dsh-im shield icon via ICONS, no new SVG')
   assert.ok(block.includes("setSettingsPage('perm'); setSettingsPanelOpen(v => !v)"), 'click must open perm settings page, never elevate')
   assert.ok(block.includes('不会立刻提权'), 'perm wording must preserve 选更高档只是记下偏好/不会立刻提权')
   assert.ok(js.includes('默认只能查看。选更高档只是记下你的偏好，不会立刻提权：科灵每次调用工具仍要你在决策区点头，实际按只读运行；高风险动作（装包、发包等）仍需在决策区拍板。'), 'settings perm tip must stay verbatim')
@@ -832,24 +846,24 @@ test('批次2 +号命令目录：渲染 status.commands，只读 action 直接 c
   assert.ok(js.includes("style: { left: '0', right: 'auto', width: '272px', top: 'auto', bottom: 'calc(100% + 4px)', maxHeight: 'min(320px, calc(100vh - 120px))' }"), 'cmdmenu must flip upward (top:auto + bottom:calc(100% + 4px)) overriding base top:100%, and clamp maxHeight with calc(100vh')
   assert.ok(js.includes('if (READONLY_CMDS.indexOf(act) >= 0) {'), 'write actions must never be called directly')
   assert.ok(js.includes('【需参数】') && js.includes('不会直接执行，请补全后自行发送'), 'write/param actions must only fill a marked hint into composer')
-  const toolsAt = js.indexOf("h('div', { className: 'md-composer-tools'")
+  const toolsAt = mustFind(js, "h('div', { className: 'md-composer-tools'", 'composer tools row')
   const block = js.slice(toolsAt, toolsAt + 4200)
-  const visionAt = block.indexOf("key: 'vision'")
-  const permAt = block.indexOf("key: 'permind'")
-  const plusAt = block.indexOf("key: 'cmdcatalog'")
-  assert.ok(plusAt >= 0 && permAt > plusAt && visionAt > permAt, 'tool row order must be +号｜权限设置｜插件功能 (DSH native left group)')
+  const visionAt = mustFind(block, "key: 'vision'", 'vision tool')
+  const permAt = mustFind(block, "key: 'permind'", 'perm tool')
+  const plusAt = mustFind(block, "key: 'cmdcatalog'", 'command catalog tool')
+  assert.ok(permAt > plusAt && visionAt > permAt, 'tool row order must be +号｜权限设置｜插件功能 (DSH native left group)')
 })
 
 test('批次2 输出侧靠左回归：注释锁定附件条靠左，不改 align-items:stretch，不新增输出侧回显', () => {
-  const previewsAt = js.indexOf("className: 'md-vision-previews'")
-  assert.ok(previewsAt > 0, 'md-vision-previews render site must exist')
+  const previewsAt = mustFind(js, "className: 'md-vision-previews'", 'md-vision-previews render site')
+  assert.ok(previewsAt > 320, 'comment window before the previews rail must be in bounds')
   const around = js.slice(previewsAt - 320, previewsAt)
   assert.ok(around.includes('align-items:stretch') && around.includes('DSH 原生'), 'comment must note attach bar left-aligns to DSH native')
-  const at = js.indexOf('.md-composer-native{')
-  const rule = js.slice(at, js.indexOf('}', at))
+  const at = mustFind(js, '.md-composer-native{', 'native composer rule')
+  const rule = js.slice(at, mustFind(js, '}', 'native composer rule end', at))
   assert.ok(rule.includes('align-items:stretch'), 'align-items:stretch must remain untouched')
-  const aiAt = js.indexOf("h('div', { className: 'md-msg-ai', key: 'ai' }")
-  const aiBlock = js.slice(aiAt, js.indexOf('\n', aiAt))
+  const aiAt = mustFind(js, "h('div', { className: 'md-msg-ai', key: 'ai' }", 'assistant md-msg-ai block')
+  const aiBlock = js.slice(aiAt, mustFind(js, '\n', 'assistant message line end', aiAt))
   assert.ok(!aiBlock.includes('md-vision-previews') && !aiBlock.includes('md-file-card'), 'no output-side image/file echo in assistant message')
 })
 
@@ -874,10 +888,9 @@ test('批次1+2 零新增硬编码 hex：本次新增片段不含任何 #RRGGBB 
 
 // ── 场景化配图：成稿页借订阅生图（关3） ─────────────────────────────────────
 test('成稿页有场景化配图按钮：复用 md-pill、中文文案、不新增独立主行动', () => {
-  const start = src.indexOf("const studioView = h('div'")
-  assert.ok(start > 0, 'studioView must exist')
-  const cssAt = src.indexOf('const CHAT_MD_CSS', start)
-  const studio = src.slice(start, cssAt > 0 ? cssAt : start + 9000)
+  const start = mustFind(src, "const studioView = h('div'", 'studioView')
+  const cssAt = mustFind(src, 'const CHAT_MD_CSS', 'CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt)
   assert.ok(studio.includes("key: 'illustrate'"), 'studio must have the illustrate button')
   assert.ok(studio.includes('配一张图'), 'button label must be 中文 配一张图')
   assert.ok(studio.includes("className: 'md-pill'"), 'illustrate button must reuse md-pill')
@@ -935,8 +948,9 @@ test('four capability boundaries are on screen verbatim in plain language', () =
 test('same capability boundary block is shown in both lab and void surfaces', () => {
   assert.ok((src.match(/capabilityBoundary\(/g) || []).length >= 2, 'shared boundary helper must exist and be mounted in both surfaces')
   assert.ok((src.match(/className: 'md-collab-boundary'/g) || []).length >= 1, 'reuse existing boundary class')
-  const at = src.indexOf("const labView = h('div'")
-  const end = src.indexOf('const collabView = h(', at)
+  const at = mustFind(src, "const labView = h('div'", 'labView')
+  const end = mustFind(src, 'const collabView = h(', 'collabView', at)
+  assert.ok(end > at, 'labView must precede collabView')
   const labSlice = src.slice(at, end)
   assert.ok(labSlice.includes("capabilityBoundary('boundary')"), 'lab surface must carry the boundary block')
   assert.ok(src.includes("capabilityBoundary('b')"), 'void surface must carry the same block')
@@ -955,8 +969,8 @@ test('image.source 三档开关与九家服务商预设真值逐字落地', () =
   assert.ok(settingsSrc.includes("key: 'image.source'"), 'image.source 定义缺失')
   assert.ok(settingsSrc.includes("options: ['auto', 'http', 'tool']"), '三档选项缺失')
   assert.ok(settingsSrc.includes("default: 'auto'"), '缺省必须为 auto')
-  const at = src.indexOf('const IMAGE_PRESETS = [')
-  const block = src.slice(at, src.indexOf('const applyImagePreset', at))
+  const at = mustFind(src, 'const IMAGE_PRESETS = [', 'IMAGE_PRESETS')
+  const block = src.slice(at, mustFind(src, 'const applyImagePreset', 'applyImagePreset', at))
   assert.ok(block, 'IMAGE_PRESETS 区块缺失')
   const expect = [
     ['OpenAI', { protocol: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-1', size: '1536x1024', quality: 'medium' }],
@@ -989,8 +1003,8 @@ test('点一次预填只写草稿：一次 setSettingDraft 写多字段，保存
 })
 
 test('image 页渲染订阅生图工具可用性小字，且提示诚实', () => {
-  const at = src.indexOf("settingsPage === 'image'")
-  const page = src.slice(at, src.indexOf("settingsPage === 'effort'", at))
+  const at = mustFind(src, "settingsPage === 'image'", 'image settings page')
+  const page = src.slice(at, mustFind(src, 'const settingsPanel =', 'settingsPanel boundary', at))
   assert.ok(page.includes('imageToolTip'), 'image 页必须渲染工具可用性小字')
   assert.ok(src.includes('const imageToolTip = imageToolAvailable'), '提示必须由状态驱动')
   assert.ok(src.includes('检测到订阅生图工具'), '有工具提示缺失')
@@ -1022,16 +1036,16 @@ test('旧 showSettings 死代码已清除，设置对话框改走复用 Dialog �
 
 test('other 子页存在并承接 30 项 settingRows 单一渲染', () => {
   assert.ok(src.includes("settingsPage === 'other'"), 'other 子页分支缺失')
-  const at = src.indexOf("settingsPage === 'other'")
-  const page = src.slice(at, src.indexOf("key: 'effort'", at))
+  const at = mustFind(src, "settingsPage === 'other'", 'other settings page')
+  const page = src.slice(at, mustFind(src, "key: 'effort'", 'effort key', at))
   assert.ok(page.includes("...settingRows.filter(r => r.key !== 'model.route').map(renderField)"), 'other 页必须渲染 30 项设置')
   assert.ok(page.includes('md-settings-body') && page.includes('md-settings-back'), 'other 页须复用既有面板样式与返回按钮')
   assert.ok(page.includes('saveSettings') && page.includes('resetSettings'), 'other 页须保留保存设置/恢复默认')
 })
 
 test('root 页含「其他与界面偏好」入口行且复用 chevR 同构样式', () => {
-  const rootAt = src.indexOf("className: 'md-settings-body', key: 'root'")
-  const root = src.slice(rootAt, src.indexOf("settingsPage === 'model'", rootAt))
+  const rootAt = mustFind(src, "className: 'md-settings-body', key: 'root'", 'root settings page')
+  const root = src.slice(rootAt, mustFind(src, "settingsPage === 'model'", 'model settings page', rootAt))
   assert.ok(root.includes("key: 'other', className: 'md-settings-row'"), 'root 页缺少「其他与界面偏好」入口行')
   assert.ok(root.includes('其他与界面偏好'), '入口行 label 缺失')
   assert.ok(root.includes("setSettingsPage('other')"), '入口行必须跳到 other 页')
@@ -1049,8 +1063,8 @@ test('四项界面偏好处理函数源码仍在，零功能倒退', () => {
 test('image.* 字段仅在 image 子页单一渲染，不再与 other 页重复', () => {
   const renderLines = src.split('\n').filter(l => l.includes("settingRows.filter(r => r.key.indexOf('image.') === 0).map(renderField)"))
   assert.equal(renderLines.length, 1, 'image.* 渲染必须只有一处')
-  const otherAt = src.indexOf("settingsPage === 'other'")
-  const other = src.slice(otherAt, src.indexOf("key: 'effort'", otherAt))
+  const otherAt = mustFind(src, "settingsPage === 'other'", 'other settings page')
+  const other = src.slice(otherAt, mustFind(src, "key: 'effort'", 'effort key', otherAt))
   assert.ok(!other.includes("r.key.indexOf('image.')"), 'other 页不得重复渲染 image.* 字段')
 })
 // ---- 齿轮设置不再强制展开科灵 dock：独立 Dialog + 内容单一渲染源 ----
@@ -1072,24 +1086,24 @@ test('settingsBody 单一渲染源：dock 内浮层与根层 Dialog 两处都调
 
 test('settingsDialog 挂渲染根层、不受 dockOpen 约束，复用现有 Dialog/md-dialog', () => {
   assert.ok(src.includes("const settingsDialog = settingsDialogOpen ? h(Dialog, { key: 'setdlg', title: '设置', onClose: () => setSettingsDialogOpen(false), width: 560 }, settingsBody()) : null"), 'settingsDialog 须复用 Dialog 组件')
-  const defAt = src.indexOf('const settingsDialog = settingsDialogOpen ?')
-  const defLine = src.slice(defAt, src.indexOf('\n', defAt))
+  const defAt = mustFind(src, 'const settingsDialog = settingsDialogOpen ?', 'settingsDialog definition')
+  const defLine = src.slice(defAt, mustFind(src, '\n', 'settingsDialog definition line end', defAt))
   assert.ok(!defLine.includes('dockOpen'), 'dialog 定义不得依赖 dockOpen')
-  const themeAt = src.indexOf('        themeDialog,')
-  const mountAt = src.indexOf('        settingsDialog,', themeAt)
-  assert.ok(themeAt > 0 && mountAt > themeAt, 'settingsDialog 须挂在 themeDialog 之后的渲染根层')
+  const themeAt = mustFind(src, '        themeDialog,', 'themeDialog mount')
+  const mountAt = mustFind(src, '        settingsDialog,', 'settingsDialog mount', themeAt)
+  assert.ok(mountAt > themeAt, 'settingsDialog 须挂在 themeDialog 之后的渲染根层')
   assert.ok(src.includes('function Dialog(props)') && src.includes("className: 'md-dialog-mask'") && src.includes("className: 'md-dialog-head'"), '须复用现成 Dialog 与 md-dialog 系列 class')
 })
 
 test('closeSettings 同时关闭浮层与对话框；内容块关闭动作改造后仍在', () => {
   assert.ok(src.includes('const closeSettings = () => { setSettingsPanelOpen(false); setSettingsDialogOpen(false) }'), 'closeSettings 须同时调两个 setter')
-  const useAt = src.indexOf('const closeSettings = () =>')
-  const panelAt = src.indexOf('const settingsPanel = (settingsPanelOpen')
+  const useAt = mustFind(src, 'const closeSettings = () =>', 'closeSettings')
+  const panelAt = mustFind(src, 'const settingsPanel = (settingsPanelOpen', 'settingsPanel')
   const block = src.slice(useAt, panelAt)
   assert.equal((block.match(/closeSettings\(\)/g) || []).length, 5, '内容块 5 处关闭动作须改调 closeSettings()')
   assert.ok(!block.slice(block.indexOf('\n')).includes('setSettingsPanelOpen(false)'), '内容块内不得残留直接 setSettingsPanelOpen(false)（closeSettings 定义本身除外）')
-  const effAt = src.indexOf('if (!settingsPanelOpen) return')
-  const effBlock = src.slice(effAt, src.indexOf('}, [settingsPanelOpen])', effAt))
+  const effAt = mustFind(src, 'if (!settingsPanelOpen) return', 'settings panel effect')
+  const effBlock = src.slice(effAt, mustFind(src, '}, [settingsPanelOpen])', 'settings panel effect end', effAt))
   assert.equal((effBlock.match(/setSettingsPanelOpen\(false\)/g) || []).length, 2, 'useEffect 两处关闭须保持原样')
   for (const t of ['模型', '推理等级', '权限模式', '生图配置', '智能体团队协作', '其他与界面偏好', '跟随默认', '推理等级越高，回答越审慎，耗时也更长。']) {
     assert.ok(src.includes(t), '设置项文案丢失：' + t)
@@ -1110,9 +1124,8 @@ test('齿轮改造新增片段零新增硬编码 hex', () => {
 
 // ---- 设置根页瘦身（用户投诉：模型/推理等级/权限/智能团队不该堆在设置首屏）----
 test('设置根页只保留生图配置与其他与界面偏好两个入口，模型相关与智能团队入口已移出', () => {
-  const rootAt = src.indexOf("className: 'md-settings-body', key: 'root'")
-  assert.ok(rootAt > 0, 'root 设置页缺失')
-  const root = src.slice(rootAt, src.indexOf("settingsPage === 'model'", rootAt))
+  const rootAt = mustFind(src, "className: 'md-settings-body', key: 'root'", 'root 设置页')
+  const root = src.slice(rootAt, mustFind(src, "settingsPage === 'model'", 'model settings page', rootAt))
   for (const k of ['model', 'effort', 'perm', 'team', 'teamtip']) {
     assert.ok(!root.includes("key: '" + k + "'"), 'root 页不得再出现 key:' + k + ' 入口')
   }
@@ -1121,16 +1134,15 @@ test('设置根页只保留生图配置与其他与界面偏好两个入口，�
 })
 
 test('推理等级入口下沉到 model 子页，返回回到 model 而非 root', () => {
-  const modelAt = src.indexOf("className: 'md-settings-body', key: 'model'")
-  assert.ok(modelAt > 0, 'model 设置子页缺失')
-  const model = src.slice(modelAt, src.indexOf("settingsPage === 'perm'", modelAt))
+  const modelAt = mustFind(src, "className: 'md-settings-body', key: 'model'", 'model 设置子页')
+  const model = src.slice(modelAt, mustFind(src, "settingsPage === 'perm'", 'perm settings page', modelAt))
   const mLines = model.split('\n')
   const effortIdx = mLines.findIndex(l => l.includes("key: 'effort', className: 'md-settings-row'"))
   assert.ok(effortIdx >= 0, 'model 子页缺少推理等级入口行')
   const effortRow = mLines.slice(effortIdx, effortIdx + 3).join('\n')
   assert.ok(effortRow.includes("onClick: () => setSettingsPage('effort')"), '入口须跳 effort 子页')
   assert.ok(/I\(\{\s*name: 'chevR', size: 14\s*\}\)/.test(effortRow), '入口须复用 chevR 箭头')
-  const effortAt = src.indexOf("className: 'md-settings-body', key: 'effort'")
+  const effortAt = mustFind(src, "className: 'md-settings-body', key: 'effort'", 'effort settings page')
   const effort = src.slice(effortAt, effortAt + 600)
   assert.ok(effort.includes("key: 'back', className: 'md-settings-row md-settings-back', onClick: () => setSettingsPage('model')"), '推理等级返回须回到 model 子页')
 })
@@ -1142,4 +1154,30 @@ test('科灵栏三入口 onClick 未被瘦身改动（盾牌进权限 / 模型�
   assert.ok(model.includes("onClick: () => { setSettingsPage('model'); loadModels(); setSettingsPanelOpen(v => !v) }"), '模型胶囊 onClick 被改动')
   const ask = src.split('\n').find(l => l.includes("key: 'askcollab'"))
   assert.ok(ask && /onClick:\s*function\s*\(\)\s*\{\s*openCollabWithGoal\(input\)\s*\}/.test(ask), '靶心 onClick 被改动')
+})
+
+// ---- P0 修复新增取证（逐字锚点；不依赖注释文案）----
+test('P0-3 权限入口盾牌名实一致：ICONS shield path + 调用点用 shield', () => {
+  const shieldPath = 'M12 3 5.5 5.8v5.1c0 4.25 2.72 7.87 6.5 9.1 3.78-1.23 6.5-4.85 6.5-9.1V5.8L12 3Z'
+  assert.ok(src.includes("shield:'" + shieldPath + "'"), 'ICONS must contain shield with the exact DSH dsh-im ShieldIcon path')
+  const permLine = src.split('\n').find(l => l.includes("key: 'permind'"))
+  assert.ok(permLine, 'perm indicator line missing')
+  assert.ok(permLine.includes("I({ name: 'shield', size: 12 })"), 'perm indicator must render shield icon')
+  assert.ok(!permLine.includes("I({ name: 'gear', size: 12 })"), 'perm indicator must no longer render gear')
+  assert.ok(permLine.includes('className: \'md-ctool md-ctool-model\''), 'perm capsule class must stay verbatim')
+})
+
+test('P0-1 collab_run 真实能力链三处在位，不依赖「已接入」注释', () => {
+  const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  assert.ok(src.includes("runCollabAction('collab_run'"), '1/3 client dispatch site missing')
+  assert.ok(host.includes("case 'collab_run'"), '2/3 host switch case missing')
+  assert.ok(host.includes('async collabRun('), '3/3 host service method missing')
+})
+
+test('P0-1 代表 marker 缺失时 -1 不得参与比较/切片（负控）', () => {
+  const missing = '__P0_ABSENT_MARKER__'
+  assert.equal(src.indexOf(missing), -1, 'negative-control marker must be absent')
+  const pickSafe = (marker, len) => { const i = src.indexOf(marker); return i < 0 ? '' : src.slice(i, i + len) }
+  assert.equal(pickSafe(missing, 200), '', 'missing marker must yield empty region, not a slice from -1')
+  assert.throws(() => mustFind(src, missing, 'negative control'), /must exist/, 'mustFind must fail loudly on a missing marker')
 })

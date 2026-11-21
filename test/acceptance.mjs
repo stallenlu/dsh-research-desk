@@ -79,7 +79,7 @@ function check(name, ok, detail) {
 
 function skip(name, reason) {
   skips++;
-  results.push({ name, ok: true, skipped: true, detail: reason });
+  results.push({ name, ok: false, skipped: true, detail: reason });
   console.log('[SKIP] ' + name + '  |  ' + reason);
 }
 
@@ -434,11 +434,13 @@ async function phaseC(base, modelRows) {
   section('C 四条模型路径');
   if (SKIP_MODEL) {
     for (const name of ['C1 ask', 'C2 review', 'C3 hypothesis', 'C4 draft']) skip(name, '--skip-model');
+    check('C0 有可用模型路由', false, '--skip-model 未验证');
     return;
   }
   const route = await pickRoute(base, modelRows);
-  check('C0 有可用模型路由', !!route, route || '没有带凭据的路由');
+  if (route) check('C0 有可用模型路由', true, route);
   if (!route) {
+    check('C0 有可用模型路由', false, '没有可用路由，C1-C4 未验证');
     for (const name of ['C1 ask', 'C2 review', 'C3 hypothesis', 'C4 draft']) skip(name, '没有可用路由');
     return;
   }
@@ -553,11 +555,11 @@ async function main() {
   }
   if (!KEEP_STATE) restoreState(stateBackup);
 
-  const passed = results.filter(r => r.ok && !r.skipped).length;
+  const passed = results.filter(r => r.ok === true && !r.skipped).length;
   console.log('');
   console.log('─────────────────────────────');
   console.log('通过 ' + passed + ' · 失败 ' + failures + ' · 跳过 ' + skips + ' · 用时 ' + Math.round((Date.now() - started) / 1000) + 's');
-  const failed = results.filter(r => !r.ok);
+  const failed = results.filter(r => !r.ok && !r.skipped);
   if (failed.length) {
     console.log('失败项：');
     for (const row of failed) console.log('  - ' + row.name + (row.detail ? '  |  ' + row.detail : ''));
