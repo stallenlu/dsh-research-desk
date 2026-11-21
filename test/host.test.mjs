@@ -937,6 +937,39 @@ test('全局 kelin.role 声明存在；本次合作角色经边界消息注入�
   assert.ok(events.some(e => e[0] === 'diag' && e[1] && e[1].at === 'vision' && e[1].imageCount === 0 && e[1].admitted === 0))
 })
 
+test('权限终态行为锁：读/写/危险/伪造四档逐一请求，实际恒为 read-only', async () => {
+  for (const wanted of ['read-only', 'workspace-write', 'danger-full-access', 'bogus']) {
+    const appliedPerms = []
+    const events = []
+    const agent = {
+      inject: () => {},
+      followup: () => {},
+      whenIdle: async () => {},
+      session: { deriveMessages: () => [] },
+      model: { current: () => ({ provider: 'fake', model: 'fake/model' }) },
+    }
+    const chatCtx = {
+      get: name => name === 'agents'
+        ? { create: async opts => { if (opts && opts.setup) await opts.setup({ session: {} }); return { agent, dispose: () => {} } } }
+        : ctx.get(name),
+      on: () => () => {},
+      permissionPresets: { set: async (sess, name) => { appliedPerms.push(name) } },
+    }
+    process.env.DSH_HOME = join(tempHome, 'case-perm-lock-' + caseIndex++)
+    const chatSvc = createService(chatCtx)
+    const c = await chatSvc.run({ action: 'collab_create', title: '权限终态' })
+    const stream = { write: (t, d) => events.push([t, d]), close: () => {} }
+    await chatSvc.chatStream({ question: '你好', collabId: c.collab.id, diag: true, perm: wanted }, stream)
+    const done = events.filter(e => e[0] === 'done')
+    assert.equal(done.length, 1, wanted + ' 应恰好一条 done 帧')
+    assert.equal(done[0][1].perm, 'read-only', wanted + ' 的 done.perm 恒为 read-only')
+    assert.deepEqual(appliedPerms, ['read-only'], wanted + ' 的 appliedPerms 恒为 [read-only]')
+    const permDiag = events.find(e => e[0] === 'diag' && e[1] && e[1].at === 'permission')
+    assert.ok(permDiag, wanted + ' 应有 permission diag 帧')
+    assert.equal(permDiag[1].permApplied, 'read-only', wanted + ' 的 diag.permApplied 恒为 read-only')
+  }
+})
+
 // ── 识图：送图前对齐官方链路的模型能力检查 ────────────────────────────────────
 const VISION_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
 

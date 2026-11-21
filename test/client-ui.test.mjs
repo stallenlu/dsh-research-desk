@@ -676,6 +676,32 @@ test('成稿页体裁段是无障碍 radiogroup，主行动唯一且为 is-prima
   assert.ok(studio.includes("className: 'md-pill'"), 'verify action must be a secondary md-pill')
 })
 
+test('成稿页写作输入框在宽屏只有对话栏一处，窄屏抽屉才补画布底部的入口', () => {
+  const start = mustFind(src, "const studioView = h('div'", 'studioView')
+  const cssAt = mustFind(src, 'const CHAT_MD_CSS', 'CHAT_MD_CSS', start)
+  const studio = src.slice(start, cssAt)
+  const sheetAt = mustFind(studio, "className: 'md-sheet-ask'", 'md-sheet-ask')
+  const askBar = studio.slice(sheetAt)
+  const compactInput = "isCompact ? h('input', { key: 'in', value: studioInput"
+  const compactSend = "isCompact ? h('button', { key: 'go', type: 'submit', className: 'md-send'"
+  assert.ok(askBar.includes(compactInput), '画布底部输入框必须只在 isCompact 抽屉态出现')
+  assert.ok(askBar.includes(compactSend), '画布底部发送按钮必须跟输入框同步收敛到抽屉态')
+  assert.ok(askBar.includes('验证这个论点'), 'verify pill 必须常驻，不能随输入框一起隐藏')
+  assert.ok(!askBar.includes("\n            h('input', { key: 'in', value: studioInput"), '不得再留无条件渲染的重复输入框')
+})
+
+test('虚空主按钮旁用白话锚点提示先去下方写目标（复用 md-muted，不加硬编码色值）', () => {
+  const start = mustFind(src, "const collabView = h('div'", 'collabView')
+  const end = mustFind(src, "const styleView = h('div'", 'styleView', start)
+  const collab = src.slice(start, end)
+  const heroAt = mustFind(collab, "className: 'md-tile md-i-hero'", 'collab hero')
+  const actionsAt = mustFind(collab, "className: 'md-hero-actions'", 'hero actions', heroAt)
+  const metricsAt = mustFind(collab, "className: 'md-metrics'", 'md-metrics', actionsAt)
+  const heroSlice = collab.slice(heroAt, metricsAt)
+  assert.ok(heroSlice.includes("h('p', { className: 'md-muted', key: 'tip' }, '先到下方「给科灵一个目标」写下目标，这里就能带队验证。')"), 'CTA 旁必须有复用 md-muted 的白话锚点提示')
+  assert.ok(heroSlice.includes('给科灵一个目标'), '提示必须点名真实的目标输入框标题')
+})
+
 test('成稿页默认体裁为 article，后端 ask 调用链保持不变', () => {
   assert.ok(src.includes("const [studioFormat, setStudioFormat] = useState('article')"), 'default genre must be article/短文')
   assert.ok(src.includes("(studioFormat === 'article' ? '短文' : '研究快报')"), 'draftStudio ask prompt must keep 短文/研究快报 mapping verbatim')
