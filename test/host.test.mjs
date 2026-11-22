@@ -1980,3 +1980,88 @@ test('完整历史记忆：早期问答在写回后仍可被 chat_search 全量�
   assert.ok(hit.matchCount > 0)
   mustFind(hit.snippet, '木星环带早期锚点', '早期问答应进入命中片段')
 })
+
+// ── 论文下载：借宿主 scihub 工具（download_paper） ───────────────────────────
+function scihubCtx(tools) {
+  return {
+    get: name => {
+      if (name === 'llm') return llm
+      if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'fake', model: 'fake/model' }) }
+      if (name === 'tools') return tools
+      return undefined
+    },
+  }
+}
+function scihubTools(handler) {
+  const calls = []
+  const defs = {
+    scihub_pdf: { parameters: { properties: { doi: { type: 'string' }, url: { type: 'string' } }, additionalProperties: false } },
+    scihub_batch: { parameters: { properties: { dois: { type: 'array' } }, required: ['dois'] } },
+  }
+  const tools = {
+    executable: name => defs[name] || null,
+    selectExecutor: () => ({ describe: defsArr => ({ schemas: defsArr.map(d => ({ name: Object.keys(defs).find(n => defs[n] === d) })) }) }),
+    execute: async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: handler(c) })) } },
+  }
+  return { tools, calls }
+}
+
+test('download_paper：单篇 doi 借 scihub_pdf 下载，参数与宿主结果如实回传', async () => {
+  const { tools, calls } = scihubTools(() => ({ isError: false, value: { ok: true, status: 'downloaded', doi: '10.1/x', path: '/tmp/x.pdf', bytes: 123, title: 'X' } }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'download_paper', doi: '10.1/x' })
+  assert.equal(res.ok, true)
+  assert.equal(res.action, 'download_paper')
+  assert.equal(res.status, 'downloaded')
+  assert.equal(res.path, '/tmp/x.pdf')
+  assert.equal(res.bytes, 123)
+  assert.equal(res.title, 'X')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].calls[0].name, 'scihub_pdf')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { doi: '10.1/x' })
+})
+
+test('download_paper：批量 dois 借 scihub_batch 下载，counts/results 如实回传', async () => {
+  const batchValue = { ok: true, status: 'partial', counts: { total: 2, downloaded: 1, failed: 1 }, outDir: '/tmp/batch', results: [{ doi: '10.1/a', ok: true, status: 'downloaded' }, { doi: '10.1/b', ok: false, status: 'not_found' }] }
+  const { tools, calls } = scihubTools(() => ({ isError: false, value: batchValue }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'download_paper', dois: ['10.1/a', '10.1/b'] })
+  assert.equal(res.ok, true)
+  assert.equal(res.status, 'partial')
+  assert.deepEqual(res.counts, batchValue.counts)
+  assert.equal(res.results.length, 2)
+  assert.equal(calls[0].calls[0].name, 'scihub_batch')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { dois: ['10.1/a', '10.1/b'] })
+})
+
+test('download_paper：doi/url/dois 都没有时直接拒绝，不调用宿主工具', async () => {
+  const { tools, calls } = scihubTools(() => ({ isError: false, value: { ok: true, status: 'downloaded' } }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'download_paper' })
+  assert.equal(res.ok, false)
+  assert.equal(res.action, 'download_paper')
+  assert.match(res.message, /doi、url 或 dois/)
+  assert.equal(calls.length, 0)
+})
+
+test('download_paper：没有可用的宿主 scihub 工具时如实说暂时做不了，不调用 execute', async () => {
+  const { tools, calls } = scihubTools(() => ({ isError: false, value: { ok: true, status: 'downloaded' } }))
+  tools.executable = () => null
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'download_paper', doi: '10.1/x' })
+  assert.equal(res.ok, false)
+  assert.equal(res.action, 'download_paper')
+  assert.match(res.message, /暂时做不了/)
+  assert.equal(calls.length, 0)
+})
+
+test('download_paper：宿主工具 isError 时如实返回失败', async () => {
+  const { tools, calls } = scihubTools(() => ({ isError: true, error: { message: '镜像要求人机验证' } }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'download_paper', url: 'https://example.org/paper' })
+  assert.equal(res.ok, false)
+  assert.equal(res.action, 'download_paper')
+  assert.match(res.message, /镜像要求人机验证/)
+  assert.equal(calls[0].calls[0].name, 'scihub_pdf')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { url: 'https://example.org/paper' })
+})
