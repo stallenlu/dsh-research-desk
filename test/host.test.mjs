@@ -290,6 +290,39 @@ test('A1: add_inspiration 空文本被 handler 拒绝，不落盘', async () => 
   assert.equal((persisted.inspirations || []).length, 0)
 })
 
+test('A3: switch_inspiration 经 action 三层写活跃位并回传 library', async () => {
+  const { svc, dir } = freshService()
+  const a = await svc.run({ action: 'add_inspiration', text: '第一条火花' })
+  const b = await svc.run({ action: 'add_inspiration', text: '第二条火花' })
+  assert.equal(a.ok, true); assert.equal(b.ok, true)
+  const res = await svc.run({ action: 'switch_inspiration', id: a.inspiration.id })
+  assert.equal(res.ok, true, '白名单放行且 switch 命中 handler')
+  assert.equal(res.action, 'switch_inspiration')
+  assert.equal(res.id, a.inspiration.id)
+  assert.ok(res.library, '回传 library')
+  assert.equal(res.library.activeInspirationId, a.inspiration.id)
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  assert.equal(persisted.activeInspirationId, a.inspiration.id, '真机行为：活跃位落盘')
+  assert.notEqual(persisted.activeInspirationId, b.inspiration.id)
+})
+
+test('A3: switch_inspiration 不存在的 id 被拒绝且不改活跃位', async () => {
+  const { svc, dir } = freshService()
+  const a = await svc.run({ action: 'add_inspiration', text: '唯一火花' })
+  const before = JSON.parse(readFileSync(statePath(dir), 'utf8')).activeInspirationId
+  const res = await svc.run({ action: 'switch_inspiration', id: 'i_notexist' })
+  assert.equal(res.ok, false)
+  const after = JSON.parse(readFileSync(statePath(dir), 'utf8')).activeInspirationId
+  assert.equal(after, before, '活跃位未变')
+})
+
+test('A3: add_inspiration 回传 library 含 activeInspirationId', async () => {
+  const { svc } = freshService()
+  const res = await svc.run({ action: 'add_inspiration', text: '带回执的火花' })
+  assert.ok(res.library)
+  assert.equal(res.library.activeInspirationId, res.inspiration.id)
+})
+
 // ── 设置 ─────────────────────────────────────────────────────────────────────
 
 test('settings 描述覆盖全部声明的设置项，补丁能落盘，reset 恢复默认', async () => {

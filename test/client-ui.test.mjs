@@ -60,11 +60,11 @@ test('topics and content tabs merged into one research desk with dual lenses', (
   assert.ok(src.includes('写作: '), 'publish-lens cards must prefix writing dimension')
   assert.ok(!src.includes("status: 'outline', source: '选题'"), 'hypothesis must not be hardcoded to outline')
 })
-test('NAV order follows the product funnel: 灵感→资料→选题→虚空→文风→排期→复盘', () => {
+test('NAV order follows the product funnel: 灵感→资料→选题→虚空→复盘（砍文风/排期）', () => {
   const m = src.match(/const NAV = (\[.*\])/)
   assert.ok(m, 'NAV declaration not found')
   const ids = [...m[1].matchAll(/\['([a-z]+)', '[^']+'\]/g)].map(x => x[1])
-  assert.deepEqual(ids, ['home', 'discover', 'research', 'lab', 'style', 'schedule', 'insights'])
+  assert.deepEqual(ids, ['home', 'discover', 'research', 'lab', 'insights'])
 })
 test('set_hypothesis_status action is fully wired in host', () => {
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
@@ -347,7 +347,7 @@ test('custom style actually applies and note capture stores text', () => {
 test('collab has a single tab mapping and dead view code is gone', () => {
   assert.ok(!src.includes("setView('collab')"), 'no跳转到不存在的 collab Tab')
   assert.ok(!src.includes("view === 'collab' ? collabView"), 'no duplicate collab dispatch branch')
-  assert.ok(src.includes("view === 'lab' ? collabView : styleView"), 'single lab→collabView dispatch remains')
+  assert.ok(src.includes("view === 'lab' ? collabView : ideaGallery"), 'single lab→collabView dispatch remains, ideaGallery fallback')
   for (const name of ['feed', 'notesView', 'planView', 'contentView']) {
     assert.ok(!src.includes('const ' + name + ' ='), 'dead code ' + name + ' should be removed')
   }
