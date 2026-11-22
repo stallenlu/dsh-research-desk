@@ -1664,3 +1664,10 @@ test('资料页检索词与结果跨刷新保持（localStorage 静态护栏）'
   assert.ok(src.includes("localStorage.setItem('rd.searchResults', JSON.stringify(searchResults))"), '检索结果须写回 rd.searchResults')
   assert.ok(/localStorage.getItem\('rd.searchResults'\).*Array\.isArray\(v\)/.test(src), '检索结果恢复须做数组校验')
 })
+
+test('scatter 卡片拖拽处理器须放行按钮点击（看它长成了什么/聚焦不误跳成稿）', () => {
+  assert.ok(src.includes("e.target.closest('button')"), 'pointerdown 须识别按钮并放行')
+  const downAt = src.indexOf('const down = e => {')
+  const guardAt = src.indexOf("e.target.closest('button')", downAt)
+  assert.ok(downAt >= 0 && guardAt > downAt && guardAt - downAt < 160, '按钮命中短路须位于 down() 开头（stopPropagation 之前）')
+})
