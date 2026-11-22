@@ -560,6 +560,8 @@ test('顶栏刷新按钮：探活后端后就地刷新，不重启主进程', ()
   assert.ok(src.includes('window.location.reload()'), 'self-reload must reload the webview in place')
   assert.ok(src.includes("key: 'selfreload', icon: 'bolt'"), 'self-reload must use bolt icon to avoid duplicate icons')
   assert.ok(src.includes('刷新界面'), 'self-reload button must carry a plain-language tooltip')
+  // 负向护栏（负责人 P5 拍板）：旧开发态词须全仓归零，防换词/改词漏检。
+  assert.ok(!src.includes('自检并就地重载') && !src.includes('自检并重载'), '旧开发态词须归零')
 })
 test('后端路由竞态：404 自动重试一次并把失败真相留痕，不只弹裸 HTTP 404', () => {
   assert.ok(src.includes('async function call(payload, attempt)'), 'call must accept attempt counter for retry')
