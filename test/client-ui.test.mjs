@@ -1623,3 +1623,45 @@ test('关3会话侧栏进度入口：读真实 collaborations、科灵带队文�
   assert.ok(css.includes('var(--ink)') && css.includes('var(--line)'), '样式必须复用语义变量')
   assert.equal((css.match(/#[0-9a-fA-F]{6}\b/g) || []).length, 0, '新增样式不得含 hex 色值')
 })
+
+// 图片数量与单张大小上限可设置：默认单次 8 张、单张 10MB；纯前端限制，服务端零改。
+test('图片上限可设置：settings 定义、pickImages 动态读取、科灵设置页挂载、README 如实说明', () => {
+  const settingsSrc = readFileSync(join(root, 'lib', 'settings.mjs'), 'utf8')
+  const readme = readFileSync(join(root, 'README.md'), 'utf8')
+
+  // D1：SETTING_DEFS 内两个 attachment.* 条目，int 类型、边界与默认值正确。
+  const defsAt = mustFind(settingsSrc, 'export const SETTING_DEFS = [', 'SETTING_DEFS 定义')
+  const defsEnd = mustFind(settingsSrc, '\n]\n\nexport const SECRET_TYPES', 'SETTING_DEFS 结束', defsAt)
+  const defs = settingsSrc.slice(defsAt, defsEnd)
+  const maxImagesAt = mustFind(defs, "key: 'attachment.maxImages'", '单次最多图片数设置键')
+  const maxImageMBAt = mustFind(defs, "key: 'attachment.maxImageMB'", '单张图片大小上限设置键')
+  const imagesDef = defs.slice(maxImagesAt, Math.min(maxImageMBAt, maxImagesAt + 300))
+  const mbDef = defs.slice(maxImageMBAt, maxImageMBAt + 300)
+  assert.ok(imagesDef.includes("type: 'int'"), 'maxImages 必须是 int')
+  assert.ok(imagesDef.includes('min: 1') && imagesDef.includes('max: 20'), 'maxImages 边界须为 1..20')
+  assert.ok(imagesDef.includes('default: 8'), 'maxImages 默认须为 8')
+  assert.ok(mbDef.includes("type: 'int'"), 'maxImageMB 必须是 int')
+  assert.ok(mbDef.includes('min: 1') && mbDef.includes('max: 50'), 'maxImageMB 边界须为 1..50')
+  assert.ok(mbDef.includes('default: 10'), 'maxImageMB 默认须为 10')
+
+  // D2：pickImages 函数体内无 4MB 硬编码，动态读 settingDraft 的两个 attachment 键。
+  const pickAt = mustFind(src, 'const pickImages = fileList => {', 'pickImages 函数')
+  const pick = src.slice(pickAt, mustFind(src, 'const readImageBase64 =', 'pickImages 结束', pickAt))
+  assert.ok(!pick.includes('4 * 1024 * 1024'), 'pickImages 不得残留 4MB 硬编码')
+  assert.ok(pick.includes("'attachment.maxImages'"), 'pickImages 必须读 attachment.maxImages')
+  assert.ok(pick.includes("'attachment.maxImageMB'"), 'pickImages 必须读 attachment.maxImageMB')
+  assert.ok(pick.includes('settingDraft['), 'pickImages 必须从 settingDraft 读值')
+  assert.ok(pick.includes('+ maxImageMB +'), '超限提示必须显示真实 MB 上限')
+  assert.ok(pick.includes('+ maxImages +'), '张数提示必须显示真实张数上限')
+  assert.ok(pick.includes('.slice(0, maxImages)'), '截断上限必须用设置值')
+
+  // D3：科灵设置页挂 attachment.* 行，复用已有保存/恢复默认按钮。
+  const assistAt = mustFind(src, "settingsPage === 'assistant'", '科灵设置页分支')
+  const assist = src.slice(assistAt, mustFind(src, "settingsPage === 'retrieval'", '科灵设置页结束', assistAt))
+  assert.ok(assist.includes("r.key.indexOf('attachment.') === 0"), '科灵设置页必须渲染 attachment.* 设置行')
+
+  // D4：README 如实说明可设置与默认 8 张 / 10MB。
+  assert.ok(readme.includes('可在设置里调整'), 'README 必须说明图片上限可设置')
+  assert.ok(readme.includes('默认单次最多 8 张图片'), 'README 默认值 8 张缺失')
+  assert.ok(readme.includes('单张不超过 10MB'), 'README 默认值 10MB 缺失')
+})
