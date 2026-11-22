@@ -1939,3 +1939,44 @@ test('记忆问答边界：约束句在宿主源码里，且宿主源码零提�
     assert.ok(hostSource.indexOf(name) === -1, '宿主源码不得出现记忆产品名：' + name)
   }
 })
+
+// ── 第一性原理①：完整历史记忆（chats[].messages 是真相源，不得被 200 条上限截断）──────
+test('完整历史记忆：超过 200 条问答写回后真相源仍全量保留', async () => {
+  const messages = Array.from({ length: 230 }, (_, i) => ({ q: '历史问题' + i, a: '历史回答' + i }))
+  const seed = { activeChatId: 'c_full', chats: [{ id: 'c_full', title: '长历史会话', messages }] }
+  const t = handoffChatCtx(seed)
+  await t.svc.store.mutate('seed full history', draft => {
+    draft.activeChatId = seed.activeChatId
+    draft.chats = seed.chats
+    draft.chat = messages.slice()
+  })
+  await t.svc.chatStream({ question: '本轮新问题', perm: 'read-only' }, { write: () => {}, close: () => {} })
+  const state = await t.svc.store.read()
+  const row = state.chats.find(c => c.id === 'c_full')
+  assert.ok(row, '活跃会话必须仍在真相源中')
+  assert.equal(row.messages.length, 231, '第 231 条问答写回后不得被截回 200 条')
+  const corpus = JSON.stringify(row.messages)
+  mustFind(corpus, '历史问题0', '第 1 条早期问答不得被抹除')
+  mustFind(corpus, '历史回答0', '第 1 条早期回答不得被抹除')
+  mustFind(corpus, '本轮新问题', '本轮新问答应追加进真相源')
+})
+
+test('完整历史记忆：早期问答在写回后仍可被 chat_search 全量检索', async () => {
+  const messages = Array.from({ length: 230 }, (_, i) => ({ q: '历史问题' + i, a: '历史回答' + i }))
+  messages[7] = { q: '木星环带早期锚点为何稳定', a: '环带早期锚点的稳定性来自共振' }
+  const seed = { activeChatId: 'c_full_search', chats: [{ id: 'c_full_search', title: '长历史检索会话', messages }] }
+  const t = handoffChatCtx(seed)
+  await t.svc.store.mutate('seed full history search', draft => {
+    draft.activeChatId = seed.activeChatId
+    draft.chats = seed.chats
+    draft.chat = messages.slice()
+  })
+  await t.svc.chatStream({ question: '再问一轮', perm: 'read-only' }, { write: () => {}, close: () => {} })
+  const out = await t.svc.run({ action: 'chat_search', query: '木星环带早期锚点' })
+  assert.equal(out.ok, true)
+  assert.equal(out.results.length, 1, '埋在第 8 条的早期锚点必须仍可检索到')
+  const hit = out.results[0]
+  assert.equal(hit.id, 'c_full_search')
+  assert.ok(hit.matchCount > 0)
+  mustFind(hit.snippet, '木星环带早期锚点', '早期问答应进入命中片段')
+})
