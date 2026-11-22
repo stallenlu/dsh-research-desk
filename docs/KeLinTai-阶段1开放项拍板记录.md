@@ -31,13 +31,13 @@
 
 - ① 记忆接 dsh-mnemon → **A 维持自有 `state.json`**。理由：接 B 推翻用户亲裁 D3「读不回=假闭环」，P6 已按 A 落地（memory 恒 `verified:false`），`lib` 全库 `mnemon_` grep=0。
   - 影响面：`lib/desk.mjs`（memory 归一化）、`lib/host.mjs`（origin 落地）、自有 `state.json` 存储；不涉及 Mnemon MCP。
-  - 锚点：`lib/desk.mjs:256/:258`、`lib/host.mjs:743` 的 origin 恒 `verified:false`（未接 Mnemon 的代码证据）；冻结依据 `docs/三件内核-关2决策冻结.md:7/:18`「本轮否掉接 Mnemon」。
+  - 锚点：`lib/desk.mjs:255-259` `normalizeOrigin()` 入口写入恒 `verified:false`（:256 非对象分支、:258 白名单分支；未接 Mnemon 的代码证据）；`lib/host.mjs:743` 为展示层缺省兜底（`row.origin || …`），非恒 false。例外（P9 已上线）：`lib/desk.mjs:887-898` `set_origin_verified` 仅服务端核验成功可把 doi/url 写 true，与「不接 Mnemon」不矛盾。冻结依据 `docs/三件内核-关2决策冻结.md:7/:18`「本轮否掉接 Mnemon」。
   - 落地状态：P6 已按 A 落地，本轮零新施工=**已符合**，无需改动代码。
 - ④ 会话范式改持久 root session → **A 保留 subagent**。理由：三条「用不全能力」已被证伪，唯一属实项（subagent 二等路由）不改变结论；A 贴合「必要简单高效」。
   - 影响面：`lib/host.mjs` 的 ACTIONS 分发（subagent 调用点），不改会话根范式。
   - 锚点：`lib/host.mjs:2515` 与 `:2777` 均为 `meta: { origin: 'subagent', plugin: 'dsh-research-desk' }`（subagent 在用）。
   - 落地状态：维持现状、零施工=**已符合**。
-- ②③ 随主线按推荐 A 收口，不单独另拍。
+- ②③ 随主线按推荐 A 收口，不单独另拍（落地状态：过程性决策，无独立代码改动，现状即符合；非本阶段 done-when 锁定项，如需单独落地再另拍）。
 - 说明：「都按建议来吧」是对终稿 §12 九项的裁定，非对拍板卡四项的单独裁定；本条补齐书面留痕，视为过程决策，用户验收可否决。
 
 ## 拍板 4 · 临时目录去留
