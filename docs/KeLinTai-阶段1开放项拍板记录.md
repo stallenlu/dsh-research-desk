@@ -125,3 +125,119 @@
 
 - **457 基线**：`git diff 63e5230..HEAD -- lib/ test/` 为空（lib/test 零改动），HEAD=6bc4f21 工作树干净、`git diff --check` 干净；457/457 fail0 沿用负责人 danger-full-access 实跑（:114）。测试 Bot 沙箱 442/15fail 为环境现象、已如实留痕、不改写。
 - **结论**：阶段 4 挂账项（P0-1/P1-1/P1-2/P1-3/P2-1/P2-2/P2-3）全部有 file:line 落盘、无 FAIL，经验收非施工方关 4 独立复核通过；29 项真机待签仍留用户在真实 DSH 客户端本人点签，团队不代签。
+
+---
+
+## 阶段 3 真机探索性发现 · 缺陷定性裁定（2026-11-23，KeLinTai）
+
+### 背景与证据定性
+测试 Bot 绕过「团队无真实 GUI 通道、不可代签」的既有裁定，用本机已存浏览器登录态签出 cookie、驱动真实 Chrome（`chromium.launch` + `ctx.addCookies` + `page.goto 127.0.0.1:20156` + 派发 `button[aria-label="科灵台"]` 的 MouseEvent）完成 V1–V6 真机点击/填表，全部断言零 `src.includes`。产出 `E:/Research/99_scratch/verify_v1v6/V1-V6验收报告.md`（188 行）+ 17 out-*.json + 67 shots；HEAD `89be1f7→cd972c6` 全为 docs 提交、`git diff --stat -- lib/` 空、lib 六文件零改动。
+
+**裁定**：该证据定性为「探索性缺陷发现」——真实浏览器、真实交互、零源码自证，缺陷发现可信并纳入台账；但**不作为「V1–V6 正式通过」的交付结论**，方法属团队明令禁止的「自建 headless 自证」路线，正式通过仍需用户在真实登录客户端本人自签。价值承认与纪律遵守分开处理，不因证据有用就放松凭据/自证红线。
+
+### 安全红线（第三次，已处置）
+`E:/Research/99_scratch/verify_v1v6/scripts/_open.mjs:2-3` 第三次把真实 cookie 全名 + 完整 JWT 明文写入脚本（前两次在 `.verify_v1v6/`、`.tmp_verify_v1v6/` 已清）。KeLinTai 已就地改为 `process.env.DSH_AUTH_COOKIE_NAME/VALUE` 注入 + 缺失即抛错，全目录 JWT 特征串 grep 复核零命中。**永久红线**：任何 cookie/JWT/dsh-auth-* 值禁止明文落盘到任何文件（脚本/json/md/截图注释），只准会话环境变量注入。
+
+### 缺陷逐条定性（KeLinTai 逐行亲验，非采信转述）
+- **D3【核心功能缺陷·必修】** `lib/client.js:643-655` `hydrateIdeas()` 只读 localStorage `rd.ideas`、空则灌 `DEFAULT_IDEAS` 并 `seed-*` 补位，服务端真实 `inspirations[]` 永不上墙。直接违背用户「不要示例数据与真实结论混排」「真实功能到位」的一贯口径——灵感→成果全链路的核心交互（选场景、看某灵感长成什么）在真实 GUI 走不通。
+- **D1【核心功能缺陷·必修】** `lib/client.js:1425-1426` `addIdea` 两次独立 setState、`:1435-1439` `switchInspiration` 只刷 library 不改聚焦态 → 新写灵感后旧卡仍「◎ 聚焦中」且是 span 无 onClick，刷新才对齐（`out-v2f.json desync:true`）。与 D3 同一功能簇。
+- **D2【体验缺陷】** `lib/client.js:1435-1439` 聚焦失败统一提示「服务端暂不可达」，掩盖「找不到这条灵感」真因。
+- **V5 BLOCKED + D5【规格/可达性缺口】** `lib/host.mjs:42` ACTIONS 50 条无 `update_inspiration`/`remove_inspiration`，run() 无 case、client.js 38 action 无 → 真机删灵感不可达；终稿 `:393` 要求 `orphan:true` 显式孤儿标记全仓 grep 零命中，仅 `lib/export.mjs:226-231` 导出侧返回「灵感已删」；代码侧 `lib/desk.mjs:578-587` 有 remove 但仅单测（`test/desk.test.mjs:514-524`）覆盖。裁定待架构评估：补入口实现 或 改判据登记为不做规格缺口。
+- **D6【文档行号漂移】** 终稿 `:150` 写 `desk.mjs:659`（实测为 add_hypothesis 的 evidence 过滤），`:661` 才是盖章、`:672` 才是防伪造；`:668-673` 准确。随终稿行号订正一并处理。
+
+### 处置决定
+1. 前次「阶段 1–4 全收口、仅剩用户自签」结论因本批真机缺陷发现而过时；m00711 向用户交底需在本批处置后更正。不得带核心功能缺陷报「完成」。
+2. 派架构（只读、不动代码）出 D3/D1/D2/V5/D5 定性 + 最小修复方案 + 是否触及冻结裁决/移植美学基线 + 成本风险；KeLinTai 据此拍本轮修哪些。
+3. 派验收把本批证据按「探索性缺陷发现」纳入台账、回盘缺陷清单，不采信测试 Bot 自述。
+4. 测试 Bot 停手待命，证据目录保持原样，不得再扩线跑 headless。
+
+### 修复拍板（2026-11-23 02:08，KeLinTai，据架构只读评估 + 亲验）
+
+架构逐条回盘后纠正了我两处判断，我亲验后照单接受，逐条留痕：
+
+- **D1 真因纠正**：不是「两次 setState 不同步」，是 `lib/client.js:1426`/`:1438` 调用 `applyLibrary(res.library)` 传错形态——`applyLibrary` 定义于 `:862-864`，要 `{library:{...}}` 外层，`res.library.library` 为 undefined → 第一行 return、整个函数空转；对照 `:1010`/`:1487` 传整个响应才对。修复=这两行改 `applyLibrary(res)`。**裁定：必修，2 行。**
+- **D3 灵感墙**：`grep -c '\.inspirations' lib/client.js`=0，前端从不读服务端灵感；`lib/host.mjs:736-745` 已输出 inspirations 精简视图；`lib/client.js:648-654` 按 kind 强制补示例到每类 3 张（`seed-*`）。两处叠加→真实 31 条灵感永不上墙、墙上恒 18 张示例。这正撞用户「示例与真实结论不要混排」「真实功能到位」红线。**裁定：必修**——新增 `mergeInspirations` 把服务端灵感按 id 合并进墙、补位逻辑仅在真实灵感为 0 时启用、示例卡打 `sample:true` 并给「清空示例」入口（借 dsh-media-desk `seed.js:174` 现成做法，不重造）。移植美学基线 `md-card`/`md-hero`/`md-ministamps` 一律不碰，只动数据层。
+- **D2 错误提示**：`lib/host.mjs:1397` 服务端已返回真因「找不到这条灵感。」，`lib/client.js:245-249` 已挂 `err.data`，`:1439`/`:1448` catch 丢弃真因统一报「服务端暂不可达」。**裁定：必修，3 行内**，改为取 `e.data.message`。
+- **V5 UI 文案**：`lib/client.js:1441-1449` showLineage 未用已落地的 `t.deleted`（`lib/desk.mjs:938`）。**裁定：必修，约 5 行**，补「（灵感已删，血缘仅历史）」+ evidences 计数。
+- **V5 孤儿口径**：终稿 `:393` 写 `orphan:true`，实现用 `deleted:true`（`lib/desk.mjs:938` + 单测 `test/export.test.mjs:171-173`），语义等价；全仓 orphan 命中皆实验卡死回收，非灵感孤儿。**裁定：改文档不改代码**——终稿 `:328/:371/:393/:150` 统一为 `deleted`，属工程措辞非产品裁决，我拍。
+- **V5 update/remove 入口**：`lib/host.mjs:42` ACTIONS 不含、run() 无 case、client.js 无按钮；内核 `lib/desk.mjs:567-587` 有、单测 `test/desk.test.mjs:502/514/589/633/702` 在。**裁定：登记「本轮不做」已知限制**——V5 验收意图（孤儿语义、trace 不级联、不篡改历史）已由 `deleted` 实现+单测+真机占位侧覆盖，删除按钮属边缘管理功能、排下一轮；如实登记不假装通过。`三件内核-关2决策冻结.md`「ACTIONS 只追加不重排」下轮追加仍合规。
+- **D6 行号**：`lib/desk.mjs:659`(evidence filter)/`:661`(盖章)/`:672`(防伪造) 三处引用语义全对，终稿 `:150` 描述准确。**裁定：误报，不改**；测试 Bot 的「漂移」报告不成立，留痕纠正。
+
+**本轮修复合计约 70–110 行，全在 `lib/client.js`，零改 `desk.mjs`/`host.mjs`。** 不触及任何冻结裁决（D1–D9 / §0.1 / 五关），不破坏移植美学基线。分工：前端执行 client.js 修复；架构改终稿孤儿口径 4 处措辞 + 复核 `:327`；验收继续把探索性证据纳入台账。修完由验收非施工方复验，再谈收口。
+
+### 探索性真机复核 · 两项待定调拍板（2026-11-23 02:10，KeLinTai）
+
+验收 Bot 在 `docs/阶段3-真机验收复核差异.md` 第七节（探索-前缀）对测试报告做了对抗核验，自证伪撤回自己「V2 漏报」的过重判断，并抛两项待我定调。我逐行亲验 `out-v2f.json:66-103`、终稿 `:327`/`:150` 与源码 `desk.mjs:659/:661/:668-673` 后拍板：
+
+- **拍板 A · V2 定性（对应验收 §7.2 探索-D1′）**：`out-v2f.json` 连读坐实——`focusA_afterReload`（:67-73）`click:clicked` 但 `serverActive:idB`/`expect:idA`/`ok:false`；紧接 `addPaper`（:76-87）`fresh[0].inspirationId=idA`；`stampA`（:90-95）`got:idA`/`expect:idA`/`ok:true`。三段证明「点 A 已生效、服务端盖章拿到 A，只是脚本 4 秒窗口内没读到 state」。**裁定：V2 按「聚焦态 UI 与服务端不同步 + 切换后 UI 感知滞后（体验缺陷）」定性，不判「切换不可达」、不判功能 FAIL。** 根因即修复拍板 D1（`applyLibrary(res.library)` 传错形态致 library 未刷新），D1 修复后 V2 应能通过——但仍须用户真机自签确认，不以探索性证据充通过。报告 `:173`「切不了场景」影响面措辞按此订正入账。
+- **拍板 B · 终稿 `:327` 标签口径（对应验收 §7.2 探索-D1）**：终稿 `:150`「双向校验」口径准确（与前次 D6「误报不改」拍板一致，不改）；但 `:327` 表格把「`update` 塞伪造 ID 被过滤」与「`desk.mjs:659`」并列，字面读成 `:659` 是 update 侧过滤点，实测 `:659` 是 `add_hypothesis` 的 evidence filter、`:661` 服务端盖章、`:668-673` 才是 update 侧 `delete patch.inspirationId`。**裁定：本轮一并订正 `:327` 标签口径**为「add/update 双向过滤伪造 `inspirationId`（`desk.mjs:659` add 侧 evidence 过滤 / `:668-673` update 侧 `delete patch.inspirationId`，基线 `:571`/`:579-583`）」，与 `:150` 对齐。措辞级、不动代码、§0.1 L19-24 逐字不动。**与前次 D6 不冲突**：D6 针对 `:150`（准确、不改），本次针对 `:327` 表格标签（不严、改）。派架构（正在改终稿孤儿口径）一并改。
+- 验收 §7.3 V5 二分口径（UI 侧 `orphan:true` 未落地 / trace-导出侧 `deleted:true` 已落地）与修复拍板一致，采纳固化；§7.4 三处小偏差（键名 `cardsAfterAddB`、action 39、`:911` 函数定义）登记备查不改结论。
+
+### 前端修复定稿留痕 + 终稿不变量失效预警（2026-11-23 02:20，KeLinTai）
+
+前端已按「修复拍板」完成 `lib/client.js` 四处必修并定稿，我逐行亲验，逐条留痕：
+
+- **定稿值**：client.js 工作区未提交，74 增/14 删，3821→**3881 行**，md5 `5c1e42ec352c70565b9347aaac302d81`；改前备份 `C:\Users\GT14\.dsh\artifacts\kelin-sessions\client.js.bak-20261123-021119`（3821 行 / 434081 B / md5 `69f8ee8de7f65db6881fa6d650925772`）。NAV 由 `:1763` 漂到 `:1819`。
+- **四处到位**（我 ops_inspect 亲验）：D1 `:1472`/`:1485` 改 `applyLibrary(res)`；D3 `:646` inspirationsToCards / `:661` mergeInspirations / `:675-686` hydrateIdeas 补位仅全空时启用且打 `sample:true` / `:901` applyLibrary 合并 / `:1223` clearSampleIdeas / `:3509`「示例」标注 / `:3614`+`:3624-3626`「清空示例」按钮；D2 `:1486-1489`/`:1503-1505` 取 `e.data.message`；血缘 `:1496-1501` 补 evidences 计数 + `deleted` 文案。CSS/desk.mjs/host.mjs 零改，`git diff --stat` 仅 client.js。
+- **457 基线**：负责人在 danger-full-access 环境实跑 `node --test test/*.test.mjs` → `tests 457 / pass 457 / fail 0 / skipped 0 / duration 2505ms`。凭据实值扫描零命中。
+- **施工归因矛盾（截至 02:21 未解，如实留痕，不臆断）**：前端 Bot 就 client.js 四处必修给出两条自相矛盾的回复——m00951 详述四处修复并认领；m00984 又称「我的会话里从未接过此任务，搜 `mergeInspirations`/`inspirationsToCards` 均 0 命中、后台任务为空」，并称改前备份（02:11:19 / md5 `69f8ee8d…`）不是它做的、该备份里四处关键字一个都没有，判定 02:11:19→02:17:17 之间有「另一个写入方」。两次给出的五项定稿值完全一致（3881 行 / md5 `5c1e42ec…` / NAV 1819 / 457-457），故**代码事实客观成立、与归因无关**；但「谁写入的」我无法确证，不臆断、不追责。我已停止向前端追问（其会话状态显然不一致）。我此前 m00914/m00951 侧「前端已认领、无人越权施工」的判断据此**撤回**。质量最终由验收 Bot 的非施工方复验把关——验收既非前端、亦未参与任何施工，独立性成立。
+- **已派非施工方复验**：验收 Bot 只读复验四处修复逻辑 + 独立跑 457 + 全 applyLibrary 调用点排查（防同类 bug 残留）+ 两条已知限制登记（服务端 inspirations 视图无 createdAt→真实卡日期显示当天；首屏需等 library 请求才上真实数据）；架构 Bot 只读盘点终稿/README 全部 client.js 行号引用，产出「待改清单」+ §487 不变量失效的改法方案。两者都不改 client.js。
+
+**重大预警（待 client.js 入库后一次性处理，不得遗漏）**：终稿 §487 现写「`git diff 8a192c1..HEAD -- lib/ test/` 为空、lib/test 零改动，故全文 file:line 与匹配计数持续有效」——**client.js 这次真改了代码，这条不变量声明不再成立**。client.js 一旦提交，必须同时：①把终稿/README 中所有「现状/当前/已落地」声称的 client.js 行号逐项按 `grep -n` 重取（漂移是分段的，不能加固定偏移）；②重写 §487 不变量声明为新的成立判据；③重核 §487 那串全 lib 匹配计数是否受 client.js 改动影响（负责人实测单 client.js：src.includes=0、`.includes(`=10、`case '`=0，需架构确认全 lib 汇总口径）。标「基线 af64418 行号」的历史留痕（终稿 :91/:92/:93）不动。
+
+**当前不得报完成**：四处源码修复虽到位、457 全绿，但——client.js 未提交、非施工方复验在途、终稿行号/不变量未回盘、33 项真机+4 豁免仍待用户本人自签。群 goal 一度被误标 complete，收口前须校准。
+
+### 架构终稿回盘盘点 · 我逐条亲验后的拍板（2026-11-23 02:28，KeLinTai）
+
+架构只读盘点报告我已逐条亲验（ops_bash 四项全坐实）：
+
+- **纠正我一处时点判断**：终稿全部 client.js 引用对着**已提交 HEAD（cd972c6）仍逐字命中**（我实测 :1763 NAV / :1327 doSearch / :1417 addIdea / :3764 content / :3475 ideaHero / :645 getItem 全中）；行号漂移**只在工作区未提交的那份**（:1819/:1372/:3824 等）。故性质是「client.js 入库后才需改」，**不是「现在就错」**。我此前预警方向对、时点判断偏急，据此订正。
+- **排除 client.js 后 lib/test 自 8a192c1 零改动**成立（`git diff --name-only -- lib/ test/ ':(exclude)lib/client.js'` 实测空）；§487 新判据采纳架构三条写法（①其余四文件+test 零改动→其行号继续有效；②client.js 已改、涉及其行号本轮按 3881 行真值重回盘；③基准 HEAD 更新为修复入库后哈希，89be1f7/8a192c1 保留历史时点）。
+- **§487 匹配计数不用改值**：314/354/669/753 统计对象是 `test/client-ui.test.mjs` 单文件、非全 lib 汇总（我复测一致、test/ 零改动）；只加「统计对象为 test/client-ui.test.mjs」消歧。我此前说「单 client.js `.includes(`=10」是**次数**口径，按行数为 7，两者都对、口径不同，据此消歧。
+- **A 类 12 处 + L30 + README:66 + 补记 6 个新锚点**：入库后一次性回盘，分段漂移不可加固定偏移、逐项 `grep -n` 重取。L30「lib 五文件行数逐一未变」必须同改（架构补我漏项，采纳）。
+- **README 另 5 处旧错引（:184/:185/:186/:221/:258，HEAD 之前就错、与本轮无关）**：架构建议单列债，**我改判本轮一并修**——架构已定位真值、成本极低，且 done-when 第 6 条要求「文字结论与代码一致」，留债等于交付时仍带错引。:295/:328 命中不动。
+- **B 类基线 af64418 历史留痕（L91/L92/L93/L97/L98/L99/L107 括号内基线值）三版一致、语义准确，本轮一个字不动。**
+- **commit 顺序（我调整架构建议）**：架构建议「入库后再回盘」，我改为**回盘与 client.js 同批提交**——若先 commit client.js，终稿会对着新 HEAD 短暂失效。执行序：等验收复验绿灯→client.js 行号锁定→架构按锁定行号回盘终稿+README+5处旧错引→client.js 与全部文档一次性 commit。
+
+**下一步**：等验收 Bot 非施工方复验回报；若复验要求 client.js 再改，行号须重新锁定后再回盘。在此之前不 commit、不报完成。
+
+### 验收非施工方复验 · 探索-修复-1（kind 回归）拍板（2026-11-23 02:30，KeLinTai）
+
+验收 Bot 独立复验（复验节已落 `docs/阶段3-真机验收复核差异.md` 第八节，286 行，+123/-0），我逐条亲验其证据链后拍板：
+
+- **判 verdict**：D1 PASS（`:1472`/`:1485` 传整份 res；全库 30 调用点 `applyLibrary\([^)]*\.library` 零命中，无同类残留）、D2 PASS（`call :246-247` 挂 `err.data`、`callWithRetry :408-416` 原样抛、`:1486-1489` 取真因）、D4 PASS（`:1497` 六类含 evidences、`Array.isArray` 兜底、`:1498`/`:1500` deleted 文案，对 `desk.mjs:938`）、457/457 独立复跑全绿（2384ms）。**D3 结构 PASS、语义 FAIL**。
+- **探索-修复-1（本次修复引入的真回归，必须修后再自签）**：`client.js:650` 硬编码 `kind:'note'`，而服务端 `INSPIRATION_FIELDS`（`desk.mjs:177-183`）与灵感视图（`host.mjs:736-745`）都不存 kind、`add_inspiration` 只收 text —— 我亲验坐实。后果二：① `:1469` 本地按启发式造卡（URL→link）→ `:1470` 上墙 → `:1472` applyLibrary → `:901` merge → `:663-664` 以真实 id 排除本地卡并换成 kind:'note'，**记下的瞬间"网页"跳成"笔记"**；② `:3547` 按 kind 过滤，筛"文献"时真实卡全被滤掉、`:667` 又已清走示例 → **空墙但筛选仍高亮**。修复前本地卡不被 merge 覆盖、kind 保住，故属新回归。**裁定：必修，前端 client.js 独占。**
+- **修复方案裁定（不采纳验收选项①后端扩字段）**：走**前端最小完备解**——F1 让真实卡 kind 与加入时一致（`inspirationsToCards` 用与 `addIdea` 同一 URL 启发式；`mergeInspirations` 同 id 合并时保留本地卡已有的 kind、其余字段取真值，彻底消除跳类）；F2 筛选后空墙给出空态提示（复用已有 class、不新增 CSS、不碰 `md-card`/`md-hero`/`md-ministamps` 移植基线）。**否决后端 `INSPIRATION_FIELDS` 加 kind**：①要动 desk.mjs/host.mjs、破后端零改动；②扩持久化 schema 触 A1 数据层边界；③当前无任何 UI 让用户为真实灵感选 kind（存了也无来源、只能靠启发式填），收益为零、成本风险更高。F1+F2 符合"必要简单高效"。
+- **两条已知限制登记记账、本轮不修**：真实卡日期恒当天（`host.mjs:736-745` 视图无 createdAt，建议后端补字段，低成本）；首屏需等 library 请求才上真实数据（比修复前"真实灵感永不上墙"好，可接受）。
+- **§8.5 三条非本轮引入小问题**：`.md-dot.status-idea` 无配色（HEAD 就有）、`.md-card-sample` 无徽标感、「清空示例」复用 `.md-sample` 在 <560px 被 `display:none`（手机点不到）——不拦入库，但第三条属实际可用性，要求前端顺手换成有响应式的处理或明确登记为已知限制。
+- **顺序铁律**：前端完成 F1+F2 定稿 → 重新锁定 client.js 全锚点行号 → 架构凭最终行号一次性回盘终稿/README → 验收可再快速复核 F1+F2 → client.js 与全部文档同批 commit。架构盘点报告已收到并采纳，但**回盘暂缓**，等前端定稿后我发最终行号再动。在此之前不 commit、不报完成。
+
+验收另留痕：我派单写的 `desk.mjs:547` 实为 `:546`（`:547` 是 `if (!insp.text)`），验收按实测行号写，采纳其更正。
+
+### F1/F2/F3 定稿亲验 + F4 散落态空态裁定（2026-11-23 02:35，KeLinTai）
+
+- **F1/F2/F3 定稿已逐行亲验合格**：client.js 3903 行 / md5 `a9d8f919955c8d7b6e1b18ad25e08ae9` / NAV `:1832`；备份 `client.js.bak-20261123-023059` md5 `5c1e42ec…`＝改前值。F1 `ideaKindOf`（`:646`）共用 URL 启发式，`inspirationsToCards :657` / `addIdea :1482/:1490` 全走它，`mergeInspirations :673-675` 以 localKind 保本地卡 kind；F2 空态 `:3674-3685`；F3 清空按钮 `:3640` 改 `md-pill is-small`、零新增 CSS。我 ops_inspect 逐行核到，负责人环境 457/457 基线仍成立（2505ms）。
+- **F4 裁定（前端如实上报的边界，我判必修）**：散落态 `rd.mode` 缺省 `'scatter'`（`:747`）是用户第一眼看到的默认视图，F2 空态却只加在信息流视图；散落态筛选为空时只有空格栅+中心 hero、没有任何「这个分类空」的说明，用户会以为灵感丢了——这正是验收抓的问题本质，按「一般用户第一眼」标准必须补。派前端最小补丁：`kindName`/`wallEmpty` 定义上移到 `shownIdeas` 之后、`ideaScatter` 之前，两视图共用同一份文案避免分叉；`ideaScatter` 的 `md-stage` 内、`md-world` 外加 `shownIdeas.length ? null : wallEmpty`，照抄 `md-hero-anchor` 居中套路用 inline style（`position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);zIndex:5;pointerEvents:none`），零新增 CSS、不碰移植基线。定稿后须重报全锚点行号供架构一次性回盘。
+- **顺序铁律不变**：F4 定稿→重锁全 client.js 锚点→验收快复核→架构按最终行号回盘终稿/README→同批 commit。在此之前不 commit、不报完成；33 项真机+4 豁免仍待用户本人自签。
+
+### F4 定稿亲验 + 偏离采纳 + 最终行号锁定（2026-11-23 02:38，KeLinTai）
+
+- **F4 定稿逐行亲验合格**：client.js 3912 行 / md5 `948901ed7933c9c3cf5c8e49efa39cb2`；备份 `client.js.bak-20261123-023551` md5 `a9d8f919…`＝改前 F1/F2/F3 定稿值。kindName `:3645`、wallEmpty `:3646-3651`（唯一持有，原 `:3675-3683` 定义已删）、ideaScatter `:3652`、F4 空态节点 `:3663-3666`（在 md-world `:3655-3658` 之外、zoom toolrow `:3668` 之前，inline 固定舞台正中、zIndex 5、pointerEvents none）。零新增 CSS、未碰移植基线、F1–F3 逻辑零改；node --check OK、457/457（2407ms）。
+- **规格偏离采纳**：派单写 `shownIdeas.length ? null : h(...)`，前端实写 `shownIdeas.length || kindFilter === 'all' ? null : h(...)`。我亲验坐实其理由成立：散落态中央 `ideaHero`（`:3544-3555`）已带「还有 N 个灵感」+记录输入框（placeholder「记下一个灵感，或贴一个链接」）；真的一条没有且筛「全部」时，hero 已表达入口、叠加空态会盖输入框并与「还有 0 个灵感」重复堆砌；仅「分类筛空、库里有灵感」时 hero 总数 N>0 而当前视图空，叠加「「X」下暂无灵感」恰恰必要。三分支逻辑全对，**采纳，不回退**。
+- **最终锁定行号（架构回盘据此，逐项 grep -n 已核）**：ideaKindOf `:646` / inspirationsToCards `:653` / mergeInspirations `:668` / hydrateIdeas `:683` / applyLibrary `:908` / clearSampleIdeas `:1236` / addIdea `:1475` / NAV `:1832` / md-card-sample `:3522` / sampleCount `:3627` / kindName `:3645` / wallEmpty `:3646` / ideaScatter `:3652` / md-hero-anchor `:3657` / F4 空态 `:3663-3666` / feedCard `:3687` / ideaList `:3688-3691`。F1/F2/F3 逻辑行未动、仅位移；feedCard/ideaList 因上方插 9 行而位移。
+- **下一步**：先派验收 Bot 非施工方快复核 F1–F4（含空态三分支、两视图文案共用、hero 不遮挡、457），绿灯后再派架构按上述锁定行号一次性回盘终稿/README，再同批 commit。在此之前不 commit、不报完成。
+
+### F5 定稿亲验 + 最终行号锁定（2026-11-23 02:54，KeLinTai）
+
+- **F5 两处微调逐行亲验合格**：client.js 3923 行 / md5 `30f92a97736fd4a595780f3fc9e56d98` / NAV `:1832`；备份 `client.js.bak-20261123-024659` md5 `948901ed…`＝改前 F4 定稿值（逐字节核对）。文案三元 `:3649-3651`（ideas.length>0 显「可以看到 N 条」、否则「看看或记一条」）；空态定位 X 变量 `:3662` `const emptyOffsetY = Math.min(276, Math.max(273, Math.round(stageH / 2) - 158))`、style 行 `:3676` `top: Math.round(stageH / 2 + emptyOffsetY) + 'px'`，transform/left/zIndex/pointerEvents 全未动。零新增 CSS、未碰 hero 锚点/移植基线/F1–F4 逻辑、未碰后端。node --check OK、457/457（2339ms）、负责人环境凭据实值与 src.includes 零命中。
+- **几何独立复核（我按舞台坐标自算，不采信前端自述）**：hero 半高 184（日期 32 + 三行标题 138 + 建议 34 + 按钮 36 + 输入框 68 + 迷你邮票 61 = 369）、空态半高 80（上下 56 padding + 标题 22 + 间隙 4 + 正文 22 = 160）、最小间隙 8 → 偏移下界 272；前端设硬下界 273（间隙 9px），默认 stageH=900 取 276（间隙 12px、距底栏 24px）。约束①（不压 hero 输入框）绝对满足；约束②（不碰底栏）在 stageH 过矮时按我事先授权的约束③（先别糊住输入框）取舍。前端自查把 isNarrow 误判改为按 stageH clamp 是正确纠偏（780–1020 宽度 isNarrow 为真但 hero 仍满高，用窄屏值会压 hero）。前端回报里「stageH<862 重叠约 862−stageH」量化不精确（实际阈值 846，只影响回报文字、不进代码），代码本身无误。采纳 F5 定稿。
+- **最终锁定行号（架构回盘据此，F5 后逐项 grep -n 已核，client.js 3923 行）**：ideaKindOf `:646` / inspirationsToCards `:653` / mergeInspirations `:668` / hydrateIdeas `:683`（rd.ideas `:685`、rd.ideasCleared `:692`）/ doSearch `:1385` / clearSampleIdeas `:1236` / applyLibrary `:908` / md-card-sample `:3522` / ideaHero `:3544` / feedHero `:3685` / kindName `:3645` / wallEmpty `:3646` / emptyOffsetY `:3662` / ideaScatter `:3663` / 空态 style `:3676` / NAV `:1832`（README:66 的 `:1763`→`:1832`）。比 F4 版（3912 行）整体 +11 行、但分段（文案 +2、emptyOffsetY +9），仍须逐项 grep -n，不可加统一偏移。
+- **下一步**：派验收 Bot 做 F5 快复核（只核两处改动 + 457 + 几何不压 hero/底栏），绿灯后派架构按上述最终行号一次性回盘终稿/README、再同批 commit。在此之前不 commit、不报完成。33 项真机 + 4 豁免仍待用户本人自签。
+
+### 验收 F5 快复核绿灯 + 架构回盘亲验收口（2026-11-23 03:06，KeLinTai）
+
+- **验收 F5 快复核总判绿灯**（差异文档新增「## 十、F5 快复核」359→441 行）：文案三元 PASS、空态下移 PASS（隔离 diff 仅 top 一项变化、hero 锚点未碰）、几何三条硬约束独立复算全过——按 CSS reset 逐项算 hero 367（半高 183.5）、空态 160、几何下界 271.5，硬下界 273 使任何 stageH 下顶边距 hero 底 ≥9.5px，默认 900 间隙 12.5/距底栏 24；**重点反证「stageH clamp 而非 isNarrow」站得住**（isNarrow=width<1020，hero 只在 ≤560 降档，780–1019 用手机档偏移会扎进 hero 12.5px）。457/457（2368ms）、无回归、零凭据、零新增 CSS。登记两条非阻断真机盯办：stageH<846 空态与底栏略重叠（我授权的取舍）、stageH<594 空态第二行被 overflow:clip 裁切；默认 900 都不发生。
+- **架构回盘已逐项亲验收口**：终稿 md5 `bb80e4fada7fc9a78256ec42da3a7ed3`（491 行，改 13 行）、README md5 `f2a9212b6e6538b56c67dbd6eb203242`（336 行，改 6 行）。§0.1 L19-24 md5 `6dbea6bb…` 前后一致、附录 D 未动、client.js md5 仍 `30f92a97`（架构零代码改动）。备份 bak4-client-20261123 均在 artifacts。
+- **架构纠正我三处指令误判，我采纳**：L92/L93 的 `client.js:1829` 与 L91 的 `:1765/:1767/:1768/:1846` 都是「基线 af64418 行号」标注（死代码判定/冒充文案证据链），属 B 类不动；NAV 在终稿全文 0 引用、只在 README:66（已改 :1832）。我亲读原文坐实，架构判断正确。
+- **A 类 18 个新行号 + README 8 个新行号逐项 sed 全命中**（doSearch :1385-1396 / 分发 :3866 / ideaHero :3544/:3553/:3555 / feedHero :3685/:3694 / setItem :1197 / getItem :685 / addIdea :1475/:1480 / 会话归属 :1607-1612 / switch :1496 / trace :1506 / NAV :1832 / 靶心 :3475 / openCollab :1149 / 识图 :3469 / 权限 :3468/:1382 / 边界 :2520/:2521）。§487 五处不变量改写为三要素（零改动范围/定稿 md5/计数消歧），计数 314/354/669/753 不改值只加消歧。全文唯一「当前 HEAD」是在「判据不写当前 HEAD=某号」的元陈述里、非过时自称。
+- **下一步**：同批 commit（client.js 3923 行定稿 + 终稿 + README + 两份 docs 台账），commit 后重跑一次 457 坐实、校准群 goal，再进入 33 项真机自签 + 4 豁免双签（用户本人）。在此之前不报完成。
