@@ -1,6 +1,6 @@
 # 架构说明
 
-本文说明 dsh-research-desk v0.3.3 的数据流、模块职责、状态文件形状与扩展点。
+本文说明 dsh-research-desk v0.3.4 的数据流、模块职责、状态文件形状与扩展点。
 
 ## 1. 数据流
 
@@ -44,7 +44,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
-| `lib/host.mjs` | 宿主半片：注册工具与 HTTP 前缀路由；承载全部 18 个 action 的服务函数 | `name`、`inject`、`apply`、`createService` |
+| `lib/host.mjs` | 宿主半片：注册工具与 HTTP 前缀路由；承载全部 50 个 action 的服务函数 | `name`、`inject`、`apply`、`createService` |
 | `lib/client.js` | 侧栏面板：五个页签的免构建 React 实现，请求同源桥 | `window.__ModuleLoader__.load` 注册 |
 | `lib/search.mjs` | arXiv / Europe PMC / OpenAlex 三源检索、arXiv 查询构造、HTML/JATS 清洗、全文抓取 | `search`、`fetchFullText`、`SOURCES` |
 | `lib/qa.mjs` | 全文分块、BM25 检索、带引文核验的问答 | `chunkText`、`retrieve`、`ask` |
@@ -53,11 +53,11 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 | `lib/export.mjs` | Markdown / BibTeX / JSON / Typst / LaTeX 五种导出与去标识 | `citeKey`、`toMarkdown`、`toBibTeX`、`toJSON`、`toTypst`、`toLatex`、`exportBundle` |
 | `lib/desk.mjs` | 领域模型与唯一写路径：字段白名单、去重、操作集 | `applyOps`、`emptyState`、`migrateState`、`paperKey` |
 | `lib/store.mjs` | 原子落盘、mtime 重读、串行写队列、撤销栈 | `Store`、`dshHome`、`revertChange` |
-| `lib/settings.mjs` | 22 条设置定义、类型校验、密钥解析 | `SETTING_DEFS`、`coerceSettings`、`readSettings`、`resolveSecret` |
+| `lib/settings.mjs` | 33 条设置定义、类型校验、密钥解析 | `SETTING_DEFS`、`coerceSettings`、`readSettings`、`resolveSecret` |
 | `lib/stats.mjs` | 纯 JS 统计自查：t 检验、效应量、置信区间、多重比较校正 | `oneSampleT`、`twoSampleWelch`、`pairedT`、`adjustPvalues` |
 | `lib/llm.mjs` | 模型路由与流式调用 | `listModels`、`defaultRoute`、`streamText` |
 | `bin/dsh-research-desk-mcp.mjs` | MCP 可执行入口：`package.json` 的 `bin` 条目 `dsh-research-desk-mcp` 指向它，`exports` 另有 `./mcp` 子路径 | `runMcpStdio()` |
-| `lib/mcp.mjs` | MCP stdio server 与 5 个工具 | `MCP_TOOLS`、`createMcpServer`、`runMcpStdio` |
+| `lib/mcp.mjs` | MCP stdio server 与 8 个工具 | `MCP_TOOLS`、`createMcpServer`、`runMcpStdio` |
 | `lib/util.mjs` | 文本、列表、编号、URL 等清洗工具 | `cleanText`、`cleanList`、`toNumber`、`isHttpUrl` |
 
 ## 3. 状态文件形状
@@ -124,7 +124,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
   "chat": [
     { "q": "...", "a": "...", "at": "ISO", "verified": 3 }
   ],
-  "settings": { "sources": ["arxiv", "europepmc", "openalex"], "maxResults": 15, "...": "共 22 项" },
+  "settings": { "sources": ["arxiv", "europepmc", "openalex"], "maxResults": 15, "...": "共 33 项" },
   "updatedAt": "ISO"
 }
 ```
@@ -136,7 +136,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 - `reviews[].sections[].citations` 是通过核验的引文，`unverified` 是被剔除的引文及其原因。
 - `experiments[]` 是每次外部调用的记录：命令内容、退出码、耗时、超时标记、stdout / stderr 摘要。
 - `chat` 保留最近 200 条；`questions` 是历史字段，恒为空数组。
-- `settings` 存的是 22 条设置的值，其中 `secrets.*` 存的是环境变量名而不是密钥值。
+- `settings` 存的是 33 条设置的值，其中 `secrets.*` 存的是环境变量名而不是密钥值。
 
 写入路径只有一条：`store.mutate(label, fn)` → `applyOps(state, ops)`。所有写操作先过字段白名单（`PAPER_FIELDS` / `HYPOTHESIS_FIELDS` / `DRAFT_FIELDS` / `EXPERIMENT_FIELDS`），不在白名单上的字段一律丢弃。撤销栈保留 30 步，回滚用三方比对（`revertChange`），只回滚这一步真正改过的字段，别人之后的改动不受影响。
 
