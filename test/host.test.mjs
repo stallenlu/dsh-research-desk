@@ -2065,3 +2065,21 @@ test('download_paper：宿主工具 isError 时如实返回失败', async () => 
   assert.equal(calls[0].calls[0].name, 'scihub_pdf')
   assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { url: 'https://example.org/paper' })
 })
+
+test('归属纪律：能力清单与通用归属护栏在宿主源码在场，且不编造具体插件归属', () => {
+  const hostSource = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
+  // D1 能力清单关键串必须在场。
+  mustFind(hostSource, '能力清单：科灵自有', 'D1 能力清单自有部分')
+  mustFind(hostSource, '这些是经科灵台借用的宿主能力', 'D1 借用宿主能力统一表述')
+  mustFind(hostSource, '不逐个标注它们属于哪个插件', 'D1 不逐个标注插件归属')
+  // D2 通用归属纪律关键串必须在场。
+  mustFind(hostSource, '归属纪律（通用规则，不是针对某个插件打补丁）', 'D2 通用纪律')
+  mustFind(hostSource, '看不到可靠的归属信息', 'D2 如实说分不清')
+  mustFind(hostSource, '绝不凭工具名前缀、命名习惯或内隐印象去推断', 'D2 不凭前缀推断')
+  mustFind(hostSource, '不要编造某个插件是独立产品', 'D2 不编造独立产品')
+  // 负断言：不得出现编造具体插件归属的措辞。
+  const fabricated = ['dsh-libgen 是独立插件', 'libgen 是独立插件', '来自 dsh-libgen', '属于 dsh-scihub']
+  for (const phrase of fabricated) {
+    assert.ok(hostSource.indexOf(phrase) === -1, '宿主源码不得编造具体插件归属：' + phrase)
+  }
+})
