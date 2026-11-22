@@ -1656,3 +1656,11 @@ test('添加资料入口对话框标题随 doc tab 变「添加科研资料」�
   assert.ok(src.includes("'aria-label': '记一条灵感', title: '记一条灵感', onClick: () => setIdeaCapOpen(true)"),
     '灵感入口不改 tab，标题保持记下一个灵感')
 })
+
+test('资料页检索词与结果跨刷新保持（localStorage 静态护栏）', () => {
+  assert.ok(src.includes("localStorage.getItem('rd.query')"), '检索词须从 rd.query 恢复')
+  assert.ok(src.includes("localStorage.setItem('rd.query', query)"), '检索词须写回 rd.query')
+  assert.ok(src.includes("localStorage.getItem('rd.searchResults')"), '检索结果须从 rd.searchResults 恢复')
+  assert.ok(src.includes("localStorage.setItem('rd.searchResults', JSON.stringify(searchResults))"), '检索结果须写回 rd.searchResults')
+  assert.ok(/localStorage.getItem\('rd.searchResults'\).*Array\.isArray\(v\)/.test(src), '检索结果恢复须做数组校验')
+})
