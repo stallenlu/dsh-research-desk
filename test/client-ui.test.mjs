@@ -1593,3 +1593,33 @@ test('关3补工：msgFilesMapRef 跨 applyLibrary 重建持久回显附件名',
   assert.ok(src.includes("setMsgs([]); msgFilesMapRef.current.clear()"), 'chat_clear must clear msgFilesMapRef')
   assert.ok(src.includes('setPositions({}); msgFilesMapRef.current.clear()'), 'clear-all must clear msgFilesMapRef')
 })
+
+// 关3：会话侧栏轻量进度入口——真实数据、诚实边界、跳虚空、零新增 hex。
+test('关3会话侧栏进度入口：读真实 collaborations、科灵带队文案、跳虚空、空态与零 hex', () => {
+  const entryAt = mustFind(src, "key: 'dockcollab'", 'dock 进度入口元素')
+  // 锁定入口函数体：往前含计数计算，往后含摘要/列表/空态/边界文案
+  const entry = src.slice(entryAt - 400, entryAt + 1800)
+
+  // 数据必须真实来自 library.collaborations，不造假控件
+  assert.ok(src.includes('const dockCollabs = Array.isArray(library.collaborations)'), '入口必须读取真实 library.collaborations')
+  assert.ok(entry.includes('dockCollabCount('), '摘要必须由真实状态计数得出')
+
+  // 唯一摘要串必须与跳 lab 在入口段内共现（setView('lab') 全文另有四处，只测包含会假阳性）
+  assert.ok(entry.includes('科灵带队 · 进行中 '), '入口段必须含唯一摘要串')
+  assert.ok(entry.includes("setView('lab')"), '入口段必须与真正渲染 collabView 的 lab 视图共现')
+  assert.ok(!entry.includes("setView('collab')"), '入口不得跳到不渲染 collabView 的 collab 视图')
+
+  // 状态徽标复用既有中文映射，不另造枚举
+  assert.ok(entry.includes('collabStatusCn('), '状态徽标必须复用 collabStatusCn')
+
+  // 空态与诚实边界
+  assert.ok(entry.includes('科灵还没带队验证过目标'), '无数据时必须如实空态')
+  assert.ok(entry.includes('虚拟实验协作'), '必须明示是科灵带队的虚拟实验协作')
+  assert.ok(entry.includes('不是 DSH 会话任务'), '必须明示不是 DSH 会话任务')
+
+  // 样式只用 .md-root 语义变量，零新增 hex
+  const cssAt = mustFind(src, 'const DOCK_COLLAB_CSS =', 'dock 进度入口样式')
+  const css = src.slice(cssAt, cssAt + 1800)
+  assert.ok(css.includes('var(--ink)') && css.includes('var(--line)'), '样式必须复用语义变量')
+  assert.equal((css.match(/#[0-9a-fA-F]{6}\b/g) || []).length, 0, '新增样式不得含 hex 色值')
+})
