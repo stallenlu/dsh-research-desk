@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { cleanText, parseJsonLoose, isHttpUrl, toNumber } from '../lib/util.mjs'
-import { applyOps, cleanProfileList, diffDeclined, emptyState, filterDeclined, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD } from '../lib/desk.mjs'
+import { applyOps, cleanProfileList, diffDeclined, emptyState, filterDeclined, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD, INSPIRATION_STATUS } from '../lib/desk.mjs'
 import { Store, revertChange } from '../lib/store.mjs'
 import { chunkText, retrieve, tokenize, ask } from '../lib/qa.mjs'
 
@@ -449,4 +449,78 @@ test('desk: migrateState 归一非法 profileDeclined 并封顶 20', () => {
     'not-an-object',
   ] })
   assert.deepEqual(dirty.profileDeclined.map(row => row.item), ['好的'], '非白名单组/非字符串被丢弃')
+})
+
+// ── 阶段 A1：灵感实体数据层（终稿 §7.1，关2 追溯表 C1–C9） ──────────────────
+// 断言全部走真实 applyOps / migrateState / emptyState 行为，不比对源码字符串。
+
+test('A1: emptyState 含 inspirations 与 activeInspirationId 两个新字段', () => {
+  const s = emptyState()
+  assert.deepEqual(s.inspirations, [])
+  assert.equal(s.activeInspirationId, '')
+})
+
+test('A1: migrateState 归一 inspirations，悬空 activeInspirationId 回退空串', () => {
+  const s = migrateState({})
+  assert.deepEqual(s.inspirations, [])
+  assert.equal(s.activeInspirationId, '')
+  assert.equal(migrateState({ activeInspirationId: 'i-ghost' }).activeInspirationId, '')
+  const ok = migrateState({ inspirations: [{ id: 'i-1', text: 'x', status: 'spark' }], activeInspirationId: 'i-1' })
+  assert.equal(ok.activeInspirationId, 'i-1', '指向真实灵感的状态位应保留')
+})
+
+test('A1: add_inspiration 服务端生成 id/createdAt/status 并设为活跃灵感', () => {
+  const s = emptyState()
+  const out = applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '一条火花' } }])
+  assert.equal(out.errors.length, 0)
+  assert.equal(s.inspirations.length, 1)
+  const row = s.inspirations[0]
+  assert.ok(typeof row.id === 'string' && row.id.startsWith('i_'), 'id 由 newId(i) 生成')
+  assert.ok(row.createdAt, 'createdAt 由服务端生成')
+  assert.equal(row.status, 'spark', '默认灵感状态为 spark')
+  assert.equal(s.activeInspirationId, row.id, '新建即成为活跃灵感')
+})
+
+test('A1: add_inspiration 采信合法 status，拒绝白名单外的 id/createdAt', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '成形', status: 'framed', id: 'hacked', createdAt: '1999' } }])
+  const row = s.inspirations[0]
+  assert.equal(row.status, 'framed')
+  assert.notEqual(row.id, 'hacked')
+  assert.ok(row.id.startsWith('i_'))
+  assert.notEqual(row.createdAt, '1999')
+})
+
+test('A1: add_inspiration 空 text 报错且不写入（不设活跃位）', () => {
+  const s = emptyState()
+  const out = applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '' } }])
+  assert.equal(out.errors.length, 1)
+  assert.equal(s.inspirations.length, 0)
+  assert.equal(s.activeInspirationId, '')
+})
+
+test('A1: update_inspiration 只改白名单字段，不改写主键', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '原' } }])
+  const id = s.inspirations[0].id
+  const createdAt = s.inspirations[0].createdAt
+  const out = applyOps(s, [{ op: 'update_inspiration', id, patch: { text: '改', id: 'evil', createdAt: '2000' } }])
+  assert.equal(out.errors.length, 0)
+  assert.equal(s.inspirations[0].id, id, '主键不可被更新改写')
+  assert.equal(s.inspirations[0].createdAt, createdAt, 'createdAt 不可被更新改写')
+  assert.equal(s.inspirations[0].text, '改')
+})
+
+test('A1: remove_inspiration 删除活跃灵感后清空状态位，不悬空', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: 'x' } }])
+  const id = s.activeInspirationId
+  const out = applyOps(s, [{ op: 'remove_inspiration', id }])
+  assert.equal(out.errors.length, 0)
+  assert.equal(s.inspirations.length, 0)
+  assert.equal(s.activeInspirationId, '', '删除活跃灵感后状态位清空')
+})
+
+test('A1: 灵感状态枚举固定为四态，不受 PAPER_STATUS 污染', () => {
+  assert.deepEqual(INSPIRATION_STATUS, ['spark', 'framed', 'pursued', 'shelved'])
 })

@@ -261,6 +261,35 @@ test('不认识的动作被拒绝，不会走进任何分支', async () => {
   assert.match(result.message, /不认识/)
 })
 
+// ── 阶段 A1：灵感 action 三层同步（关2 追溯表 C10–C12） ─────────────────────
+// 走 svc.run 真实分发：白名单 → switch → handler → store.mutate，断言落盘行为。
+
+test('A1: add_inspiration 经 action 三层落盘并回传灵感与活跃位', async () => {
+  const { svc, dir } = freshService()
+  const result = await svc.run({ action: 'add_inspiration', text: '从检索框升级来的火花' })
+  assert.equal(result.ok, true, '白名单放行且 switch 命中 handler')
+  assert.equal(result.action, 'add_inspiration')
+  assert.ok(result.inspiration, '回传新建灵感')
+  assert.ok(result.inspiration.id.startsWith('i_'))
+  assert.equal(result.inspiration.status, 'spark')
+  assert.equal(result.activeInspirationId, result.inspiration.id)
+  // 真机行为：state.json 必须真的写入灵感实体与活跃位，不是只在内存里。
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  assert.equal(persisted.inspirations.length, 1)
+  assert.equal(persisted.inspirations[0].id, result.inspiration.id)
+  assert.equal(persisted.activeInspirationId, result.inspiration.id)
+})
+
+test('A1: add_inspiration 空文本被 handler 拒绝，不落盘', async () => {
+  const { svc, dir } = freshService()
+  const result = await svc.run({ action: 'add_inspiration', text: '   ' })
+  assert.equal(result.ok, false)
+  // 拒绝路径不写 state.json（文件不存在）也应视为未落盘。
+  let persisted = { inspirations: [] }
+  try { persisted = JSON.parse(readFileSync(statePath(dir), 'utf8')) } catch (e) {}
+  assert.equal((persisted.inspirations || []).length, 0)
+})
+
 // ── 设置 ─────────────────────────────────────────────────────────────────────
 
 test('settings 描述覆盖全部声明的设置项，补丁能落盘，reset 恢复默认', async () => {
