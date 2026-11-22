@@ -735,7 +735,7 @@ test('粘贴分流：图片进识图队列、文档进资料登记、不支持�
   assert.ok(src.includes("if (docFiles.length) {"), 'doc branch must register docs as pending and stage their bytes')
   assert.ok(src.includes("ingestRdDocs(docFiles, true)"), 'doc branch must register docs as pending')
   assert.ok(src.includes("setPendingFiles(prev => added.concat(prev))"), 'doc branch must stage byte payloads into pendingFiles')
-  assert.ok(src.includes("这类文件暂时放不进来，可用图片或 PDF / Word / PPT / Excel / txt / md。"), 'unsupported types must get one restrained plain-language hint')
+  assert.ok(src.includes("这类文件暂时放不进来，可用图片或 PDF / Word / PPT / Excel / txt / md / html。"), 'unsupported types must get one restrained plain-language hint')
   assert.ok(src.includes("...(markPending ? { composerPending: true } : {})"), 'pending marker must be added without changing the doc row shape')
 })
 
@@ -1526,3 +1526,23 @@ test('关3 对话轮次标尺：旧侧边刻度命名负向控制仍为零', () 
     assert.ok(src.includes("const setPerm = v => { setPermMode(v); try { localStorage.setItem('rd.perm', v) } catch (e) {} }"), 'setPerm 仍只写本地偏好，不得伪造提权')
     assert.ok(src.includes('选择新会话的默认权限模式；新会话按所选档生效'), '权限页说明改为新会话按所选档生效')
   })
+
+test('粘贴/选择 html、htm 文件作为原始资料被支持', () => {
+  const docExtLine = src.split('\n').find(l => l.includes('const DOC_EXT = {'))
+  assert.ok(docExtLine, 'DOC_EXT 定义行必须存在')
+  assert.ok(docExtLine.includes("html: 'html'") && docExtLine.includes("htm: 'htm'"), 'DOC_EXT 必须纳入 html 与 htm')
+
+  const unsupLine = src.split('\n').find(l => l.includes("'，可用 PDF / Word / PPT / Excel / txt / md / html。'"))
+  assert.ok(unsupLine, 'ingestRdDocs 不支持提示必须含 html')
+  const intakeLine = src.split('\n').find(l => l.includes("'这类文件暂时放不进来，可用图片或 PDF / Word / PPT / Excel / txt / md / html。'"))
+  assert.ok(intakeLine, 'intakeFiles 不支持提示必须含 html')
+
+  const accept = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.tex,.bib,.epub,.html,.htm'
+  const acceptLines = src.split('\n').filter(l => l.includes(accept))
+  assert.equal(acceptLines.length, 2, '灵感墙科研文档与对话区文件选择器两处 accept 都必须含 .html,.htm')
+
+  assert.ok(src.includes("'选择 PDF / Word / PPT / Excel / txt / html'"), '科研文档按钮文案必须含 html')
+  assert.ok(src.includes("accept: 'image/*,video/*'"), '图片/视频选择器 accept 不得被误改')
+  assert.ok(src.includes("accept: 'image/png,image/jpeg,image/webp,image/gif'"), 'vision 图片选择器 accept 不得被误改')
+  assert.ok(src.includes("accept: '.md,.bib,.json'"), '导入文献选择器 accept 不得被误改')
+})
