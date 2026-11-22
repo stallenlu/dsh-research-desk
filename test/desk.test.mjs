@@ -524,3 +524,70 @@ test('A1: remove_inspiration 删除活跃灵感后清空状态位，不悬空', 
 test('A1: 灵感状态枚举固定为四态，不受 PAPER_STATUS 污染', () => {
   assert.deepEqual(INSPIRATION_STATUS, ['spark', 'framed', 'pursued', 'shelved'])
 })
+
+
+// ── 阶段 A2：成果归属盖章（终稿 §7.2，关2 追溯表 C1–C13） ──────────────────
+// 断言全部走真实 applyOps 行为：盖章来自 state.activeInspirationId，非源码字符串。
+function seedInspiration(s, text) {
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text } }])
+  return s.activeInspirationId
+}
+
+test('A2/V2: 活跃灵感 A 下五类成果均盖章 inspirationId==A（op 伪造被覆盖）', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '灵感A')
+  applyOps(s, [
+    { op: 'add_paper', paper: { title: '文献1', inspirationId: 'FORGED' } },
+    { op: 'add_hypothesis', title: '假说1', inspirationId: 'FORGED' },
+    { op: 'add_draft', title: '草稿1', body: '正文', inspirationId: 'FORGED' },
+    { op: 'add_review', topic: '综述1', sections: [{ text: '一段' }], inspirationId: 'FORGED' },
+    { op: 'add_experiment', title: '实验1', inspirationId: 'FORGED' },
+  ])
+  assert.equal(s.papers[0].inspirationId, A)
+  assert.equal(s.hypotheses[0].inspirationId, A)
+  assert.equal(s.drafts[0].inspirationId, A)
+  assert.equal(s.reviews[0].inspirationId, A)
+  assert.equal(s.experiments[0].inspirationId, A)
+  assert.notEqual(s.papers[0].inspirationId, 'FORGED', 'op 伪造值被服务端盖章覆盖')
+})
+
+test('A2/V2: 切灵感 A→B 后新成果归属 B，不覆盖 A 的既有成果', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '灵感A')
+  applyOps(s, [{ op: 'add_paper', paper: { title: '归A' } }])
+  const B = seedInspiration(s, '灵感B')
+  assert.notEqual(A, B)
+  applyOps(s, [{ op: 'add_paper', paper: { title: '归B' } }])
+  assert.equal(s.papers.find(p => p.title === '归A').inspirationId, A)
+  assert.equal(s.papers.find(p => p.title === '归B').inspirationId, B)
+})
+
+test('A2/V4: update 三路径塞伪造 inspirationId 被过滤，归属不变', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '灵感A')
+  applyOps(s, [
+    { op: 'add_paper', paper: { title: 'P' } },
+    { op: 'add_hypothesis', title: 'H' },
+    { op: 'add_experiment', title: 'E' },
+  ])
+  applyOps(s, [
+    { op: 'update_paper', id: s.papers[0].id, patch: { title: 'P2', inspirationId: 'FORGED' } },
+    { op: 'update_hypothesis', id: s.hypotheses[0].id, patch: { title: 'H2', inspirationId: 'FORGED' } },
+    { op: 'update_experiment', id: s.experiments[0].id, patch: { title: 'E2', inspirationId: 'FORGED' } },
+  ])
+  assert.equal(s.papers[0].inspirationId, A, 'update_paper 不改归属')
+  assert.equal(s.hypotheses[0].inspirationId, A, 'update_hypothesis 不改归属')
+  assert.equal(s.experiments[0].inspirationId, A, 'update_experiment 不改归属')
+  assert.equal(s.papers[0].title, 'P2', '其他字段正常更新')
+})
+
+test('A2/V5: 删灵感后派生实体保留孤儿 inspirationId，状态位清空（不级联）', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '灵感A')
+  applyOps(s, [{ op: 'add_paper', paper: { title: '孤儿文' } }])
+  assert.equal(s.papers[0].inspirationId, A)
+  applyOps(s, [{ op: 'remove_inspiration', id: A }])
+  assert.equal(s.inspirations.length, 0)
+  assert.equal(s.activeInspirationId, '', '删活跃灵感清状态位')
+  assert.equal(s.papers[0].inspirationId, A, '孤儿标记保留，不级联篡改历史成果')
+})
