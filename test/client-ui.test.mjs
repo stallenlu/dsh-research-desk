@@ -1546,3 +1546,50 @@ test('粘贴/选择 html、htm 文件作为原始资料被支持', () => {
   assert.ok(src.includes("accept: 'image/png,image/jpeg,image/webp,image/gif'"), 'vision 图片选择器 accept 不得被误改')
   assert.ok(src.includes("accept: '.md,.bib,.json'"), '导入文献选择器 accept 不得被误改')
 })
+
+test('关3 HTML 附件两条断链修复：send 闭包/竞态 + 用户消息附件回显', () => {
+  // D1：send 依赖数组追加 pendingFiles（与 ref 方案并存的双保险）
+  const depsAt = mustFind(src, 'library.activeChatId, pendingFiles', 'send deps must include pendingFiles')
+  assert.ok(depsAt !== -1)
+
+  // D2：ref + 加载 Promise 竞态等待 + 用最新 ref 构造 payload
+  assert.ok(src.includes('const pendingFilesRef = useRef([])'), 'must track latest staged bytes in a ref')
+  assert.ok(src.includes('const pendingFilesLoadRef = useRef(null)'), 'must track in-flight byte-read promise')
+  assert.ok(src.includes('if (pendingFilesLoadRef.current) { try { await pendingFilesLoadRef.current } catch (e) {} }'), 'send must await in-flight byte reads')
+  assert.ok(src.includes('files: stagedFiles.map(x => ({ name: x.name, data: x.data })),'), 'payload must use latest ref bytes, not stale closure')
+  assert.ok(src.includes('pendingFilesRef.current = added.concat(pendingFilesRef.current)'), 'intake must sync ref')
+  assert.ok(src.includes('pendingFilesRef.current = pendingFilesRef.current.filter(x => x.name !== doc.name)'), 'remove must sync ref')
+
+  // D3：用户消息对象带 files 字段，await 后回填附件名
+  assert.ok(src.includes("{ role: 'me', text: q, files: [] }"), 'user message must carry files field')
+  assert.ok(src.includes('{ files: stagedNames }'), 'await must backfill attachment names into the user message')
+
+  // D4：用户消息渲染分支回显附件 chip，复用 md-file-card，零新增 hex
+  const userAt = mustFind(src, "m.role === 'me' ? h('div', { className: 'md-msg-user'", 'user message render branch')
+  const userBlock = src.slice(userAt, mustFind(src, '\n', 'user message render line end', userAt))
+  assert.ok(userBlock.includes("'md-file-card'") && userBlock.includes('m.files && m.files.length'), 'user message must echo attachment chips via md-file-card')
+
+  // D5：注释如实描述回显，不再说不回显
+  assert.ok(!src.includes('输出侧不回显图片/文件卡片'), 'stale no-echo comment must be gone')
+  assert.ok(src.includes('发送后用户消息也会回显附件名'), 'comment must state attachments are echoed')
+})
+
+test('关3补工：msgFilesMapRef 跨 applyLibrary 重建持久回显附件名', () => {
+  // 稳定 ref：与 pendingFilesRef 并列，按问题文本缓存附件名队列
+  const refAt = mustFind(src, 'const msgFilesMapRef = useRef(new Map())', 'must declare msgFilesMapRef')
+  assert.ok(refAt !== -1)
+
+  // send 回填时按 q 存队列（同文本多次问用 push/shift）
+  assert.ok(src.includes('const qQueue = msgFilesMapRef.current.get(q) || []'), 'send must read queue by question text')
+  assert.ok(src.includes('qQueue.push(stagedNames)'), 'send must enqueue attachment names')
+  assert.ok(src.includes('msgFilesMapRef.current.set(q, qQueue)'), 'send must store queue keyed by question text')
+
+  // applyLibrary 重建 me 消息时消费式取附件名并带 files
+  const consumeAt = mustFind(src, 'const files = queue && queue.length ? queue.shift() : null', 'applyLibrary must consume queued files')
+  assert.ok(src.slice(consumeAt, consumeAt + 400).includes("rebuilt.push({ role: 'me', text: q, files: files })"), 'rebuilt user message must carry files')
+  assert.ok(src.slice(consumeAt - 120, consumeAt + 400).includes('msgFilesMapRef.current.get(q)'), 'applyLibrary must look up by question text')
+
+  // 清空对话同步清映射，避免残留
+  assert.ok(src.includes("setMsgs([]); msgFilesMapRef.current.clear()"), 'chat_clear must clear msgFilesMapRef')
+  assert.ok(src.includes('setPositions({}); msgFilesMapRef.current.clear()'), 'clear-all must clear msgFilesMapRef')
+})
