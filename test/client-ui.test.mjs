@@ -554,12 +554,12 @@ test('模型列表加载失败可重试，面板不误导显示科灵模型', ()
   assert.ok(/modelsStatus === 'loading' \? '正在读取可用模型…'/.test(src), 'loading state must show honest loading copy')
   assert.ok(!src.includes("'科灵模型'"), 'fallback label must not pretend a 科灵模型 exists')
 })
-test('顶栏自检按钮：探活后端后就地重载，不重启主进程', () => {
+test('顶栏刷新按钮：探活后端后就地刷新，不重启主进程', () => {
   assert.ok(src.includes('const doSelfReload = useCallback'), 'must have a self-reload callback')
   assert.ok(src.includes("action: 'status'"), 'self-reload must probe backend liveness')
   assert.ok(src.includes('window.location.reload()'), 'self-reload must reload the webview in place')
   assert.ok(src.includes("key: 'selfreload', icon: 'bolt'"), 'self-reload must use bolt icon to avoid duplicate icons')
-  assert.ok(src.includes('自检并就地重载'), 'self-reload button must carry a plain-language tooltip')
+  assert.ok(src.includes('刷新界面'), 'self-reload button must carry a plain-language tooltip')
 })
 test('后端路由竞态：404 自动重试一次并把失败真相留痕，不只弹裸 HTTP 404', () => {
   assert.ok(src.includes('async function call(payload, attempt)'), 'call must accept attempt counter for retry')
