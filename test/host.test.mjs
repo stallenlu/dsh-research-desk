@@ -964,6 +964,76 @@ test('collab_evaluate 的 verdict 只读复制假说 status，传入 verdict 不
   assert.equal(e.library.collaborations[0].evaluation.conclusion, '结论')
 })
 
+// ── refactor-D D6：测量权 / 判断责任分离（关2 追溯表 C9，Chief 判断 10/11/12）──
+// 机器 verdict 属测量结论，只能出 pending 提案、不得直改假说 status；采纳须人工。
+function d6Seed(withCollab) {
+  return {
+    papers: [],
+    hypotheses: [{ id: 'h1', title: '假', status: 'testing', rationale: '', gap: '', experiment: '', evidence: [], at: null }],
+    drafts: [], reviews: [],
+    experiments: [{ id: 'e1', title: '实', hypothesisId: 'h1', status: 'done', runtime: 'node', code: '', params: {}, packages: [], artifacts: [], criteria: [], metrics: {}, createdAt: null }],
+    collaborations: withCollab ? [{ id: 'c1', title: '评估', goal: { text: '评估', source: 'human' }, autonomy: 'L3', experimentIds: ['e1'], decisions: [], steps: [], status: 'active' }] : [],
+    questions: [], inspirations: [], chats: [], chat: [], settings: {},
+  }
+}
+
+test('D6: collab 关联实验的机器 verdict 出 pending 提案，不直改假说 status', async () => {
+  const { svc, dir } = freshService(d6Seed(true))
+  const r = await svc.run({ action: 'experiment_iterate', runId: 'e1', verdict: 'supported' })
+  assert.equal(r.ok, true)
+  assert.equal(r.hypothesisStatus, null, '机器不得回写 status')
+  assert.ok(r.proposal, '应产出提案')
+  assert.equal(r.proposal.collabId, 'c1')
+  assert.ok(r.proposal.decisionId)
+  // 真机落盘：假说 status 未变，提案落 collab.decisions 且 pending:true
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  assert.equal(persisted.hypotheses[0].status, 'testing', 'status 未被机器改')
+  const dec = persisted.collaborations[0].decisions.find(d => d.id === r.proposal.decisionId)
+  assert.ok(dec, '提案已落盘')
+  assert.equal(dec.pending, true)
+  assert.match(dec.point, /^verdict:e1:supported/)
+  assert.equal(persisted.collaborations[0].status, 'waiting-human')
+})
+
+test('D6: standalone 实验 verdict 只呈现，不造 collab、不改 status', async () => {
+  const { svc, dir } = freshService(d6Seed(false))
+  const r = await svc.run({ action: 'experiment_iterate', runId: 'e1', verdict: 'rejected' })
+  assert.equal(r.ok, true)
+  assert.equal(r.proposal, null)
+  assert.equal(r.hypothesisStatus, null)
+  assert.match(r.message, /仅作呈现/)
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  assert.equal(persisted.hypotheses[0].status, 'testing')
+  assert.equal(persisted.collaborations.length, 0, '未造 collab')
+})
+
+test('D6: 提案不得被 agent 采纳，人工采纳写 by/choice/pending 三元组且不回写 status', async () => {
+  const { svc, dir } = freshService(d6Seed(true))
+  const it = await svc.run({ action: 'experiment_iterate', runId: 'e1', verdict: 'held' })
+  const did = it.proposal.decisionId
+  const noHuman = await svc.run({ action: 'collab_decision_answer', collabId: 'c1', decisionId: did, choice: 'approve', by: 'agent' })
+  assert.equal(noHuman.ok, false)
+  const yes = await svc.run({ action: 'collab_decision_answer', collabId: 'c1', decisionId: did, choice: 'approve', by: 'human' })
+  assert.equal(yes.ok, true)
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  const dec = persisted.collaborations[0].decisions.find(d => d.id === did)
+  assert.equal(dec.pending, false)
+  assert.equal(dec.choice, 'approve')
+  assert.equal(dec.by, 'human')
+  assert.equal(persisted.hypotheses[0].status, 'testing', '采纳后也不自动回写 status（D6 语义留白）')
+})
+
+test('D6: 同一实验重复迭代不重复生成 pending 提案', async () => {
+  const { svc, dir } = freshService(d6Seed(true))
+  await svc.run({ action: 'experiment_iterate', runId: 'e1', verdict: 'supported' })
+  const r2 = await svc.run({ action: 'experiment_iterate', runId: 'e1', verdict: 'supported' })
+  assert.equal(r2.proposal, null, '第二次不重复出提案')
+  assert.match(r2.message, /已存在待决提案/)
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  const pendings = persisted.collaborations[0].decisions.filter(d => d && d.pending === true && String(d.point || '').indexOf('verdict:e1:') === 0)
+  assert.equal(pendings.length, 1)
+})
+
 test('collab_list 返回 collaborations 与 library', async () => {
   const { svc } = freshService()
   await svc.run({ action: 'collab_create', title: 'A' })
@@ -2170,4 +2240,138 @@ test('归属纪律：能力清单与通用归属护栏在宿主源码在场，�
   for (const phrase of fabricated) {
     assert.ok(hostSource.indexOf(phrase) === -1, '宿主源码不得编造具体插件归属：' + phrase)
   }
+})
+
+
+// ── refactor-D / D1+D5：add_inspiration 三层透传 D1 字段 ────────────────────
+test('D1/D5: add_inspiration 经 action 三层把 D1 字段落盘（真机行为）', async () => {
+  const { svc, dir } = freshService()
+  const res = await svc.run({ action: 'add_inspiration', text: '三层锚点灵感',
+    origin: { type: 'url', ref: 'https://example.org/a', verified: true },
+    confidence: 0.66, confidenceSource: 'human' })
+  assert.equal(res.ok, true)
+  const p = JSON.parse(readFileSync(statePath(dir), 'utf8')).inspirations[0]
+  assert.equal(p.origin.type, 'url')
+  assert.equal(p.origin.ref, 'https://example.org/a')
+  assert.equal(p.origin.verified, false, '三层同样不谎称已核验')
+  assert.equal(p.confidence, 0.66)
+  assert.equal(p.confidenceSource, 'human')
+})
+
+test('D1: confidenceSource 非法值经三层回落到 model', async () => {
+  const { svc, dir } = freshService()
+  await svc.run({ action: 'add_inspiration', text: '非法来源', confidenceSource: 'oracle' })
+  const p = JSON.parse(readFileSync(statePath(dir), 'utf8')).inspirations[0]
+  assert.equal(p.confidenceSource, 'model')
+})
+
+
+// ── refactor-D / D3：ask 落证据节点（逐条引文 + 灵感归属 + verified） ─────────
+test('D3: ask 把逐条核验引文写进 questions[]，带灵感归属与 verified', async () => {
+  const { svc, dir } = freshService({ papers: [SEEDED_PAPER], settings: {} })
+  const ins = await svc.run({ action: 'add_inspiration', text: '问答归属灵感' })
+  assert.equal(ins.ok, true)
+  modelText = JSON.stringify({
+    answer: 'The protocol uses a fixed method.',
+    // 两条都进 citations：ask 内部逐字核验，#1 通过、#0 的 quote 对不上 → 记成未核验。
+    citations: [
+      { chunkId: 'p_seed0001#1', quote: MARKER },
+      { chunkId: 'p_seed0001#0', quote: 'never wrote this' },
+    ],
+  })
+  const result = await svc.run({ action: 'ask', question: QUESTION })
+  assert.equal(result.ok, true)
+  const p = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  const ev = p.questions || []
+  assert.equal(ev.length, 2, '核验通过 + 未核验各一条都留痕')
+  const good = ev.find(e => e.verified === true)
+  const bad = ev.find(e => e.verified === false)
+  assert.ok(good, '有核验通过的节点')
+  assert.equal(good.inspirationId, ins.inspiration.id, '归属服务端盖章为活跃灵感')
+  assert.equal(good.chunkId, 'p_seed0001#1')
+  assert.equal(good.quote, MARKER)
+  assert.equal(good.paperId, 'p_seed0001', '核验通过节点带真实 paperId（qa.mjs:208 固化）')
+  assert.ok(bad, '未核验节点也留痕')
+  // 未核验引文来自 qa.mjs:201/205（无 paperId），服务端 host.mjs:1490 如实补空串——
+  // 强断言具体值，不只验字段存在，确保"没测出来源"不被伪装成有来源。
+  assert.equal(bad.paperId, '', '未核验节点无来源 paperId，服务端留空串')
+  assert.equal(bad.quote, 'never wrote this', '未核验节点保留原始 quote 供追溯')
+})
+
+test('D3: trace_inspiration 回执含证据段条数提示', async () => {
+  const { svc } = freshService({ papers: [SEEDED_PAPER], settings: {} })
+  const ins = await svc.run({ action: 'add_inspiration', text: '追踪证据灵感' })
+  modelText = JSON.stringify({
+    answer: 'Fixed method.',
+    citations: [{ chunkId: 'p_seed0001#1', quote: MARKER }],
+    unverified: [],
+  })
+  await svc.run({ action: 'ask', question: QUESTION })
+  const t = await svc.run({ action: 'trace_inspiration', id: ins.inspiration.id })
+  assert.equal(t.ok, true)
+  assert.equal(t.trace.evidences.length, 1)
+  assert.match(t.message, /逐字核验引文/)
+})
+
+
+// ── refactor-D / D4：发布软闸（显著标记 + metadata，不硬拦，不造比对） ─────────
+test('D4: 伪造引文稿 set_draft_status→published 落 verification 标记，libraryView 暴露，不硬拦', async () => {
+  const seed = {
+    inspirations: [{ id: 'i_gate1', text: '含未核验灵感', status: 'spark', createdAt: '2026-01-01' }],
+    activeInspirationId: 'i_gate1',
+    drafts: [{ id: 'd_gate1', title: '带伪造引文稿', body: '正文', status: 'draft', inspirationId: 'i_gate1', at: '2026-01-01' }],
+    reviews: [{ id: 'r_gate1', topic: '综述', sections: [], stats: { unverifiedCount: 2 }, inspirationId: 'i_gate1', at: '2026-01-01' }],
+    questions: [],
+  }
+  const { svc, dir } = freshService(seed)
+  const res = await svc.run({ action: 'set_draft_status', id: 'd_gate1', status: 'published' })
+  assert.equal(res.ok, true)
+  assert.equal(res.status, 'published', '软闸不硬拦，状态真实变更')
+  assert.match(res.message, /未核验引文/, '回执显著标记')
+
+  const p = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  assert.equal(p.drafts[0].status, 'published', 'state.json 真实落盘 published')
+  assert.equal(p.drafts[0].verification.unverified, true)
+  assert.equal(p.drafts[0].verification.count, 2)
+
+  const vd = (res.library.drafts || []).find(d => d.id === 'd_gate1')
+  assert.ok(vd, 'libraryView 含该草稿')
+  assert.equal(vd.verification.unverified, true, 'libraryView 暴露 verification 供前端渲染')
+})
+
+test('D4: questions 未核验信号（D3 落盘）同样触发软闸，且只认本灵感', async () => {
+  const seed = {
+    inspirations: [{ id: 'i_a', text: 'A', status: 'spark', createdAt: '2026-01-01' }],
+    activeInspirationId: 'i_a',
+    drafts: [{ id: 'd_a', title: '稿A', body: '正文', status: 'draft', inspirationId: 'i_a', at: '2026-01-01' }],
+    reviews: [],
+    questions: [
+      { id: 'q1', inspirationId: 'i_a', chunkId: 'c1', quote: '伪造', verified: false, at: '2026-01-01' },
+      { id: 'q2', inspirationId: 'i_other', chunkId: 'c2', quote: '他人伪造', verified: false, at: '2026-01-01' },
+    ],
+  }
+  const { svc } = freshService(seed)
+  const res = await svc.run({ action: 'set_draft_status', id: 'd_a', status: 'published' })
+  assert.equal(res.ok, true)
+  assert.equal(res.draft.verification.unverified, true)
+  assert.equal(res.draft.verification.count, 1, '只算本灵感的 1 条未核验，他人不串入')
+})
+
+test('D4: 发现语境（ready）零标记；真实引文（unverifiedCount=0）不误伤', async () => {
+  const seed = {
+    inspirations: [{ id: 'i_b', text: 'B', status: 'spark', createdAt: '2026-01-01' }],
+    activeInspirationId: 'i_b',
+    drafts: [
+      { id: 'd_ready', title: '初稿', body: '正文', status: 'draft', inspirationId: 'i_b', at: '2026-01-01' },
+      { id: 'd_clean', title: '干净稿', body: '正文', status: 'draft', inspirationId: 'i_b', at: '2026-01-01' },
+    ],
+    reviews: [{ id: 'r_clean', topic: '综述', sections: [], stats: { unverifiedCount: 0 }, inspirationId: 'i_b', at: '2026-01-01' }],
+    questions: [],
+  }
+  const { svc } = freshService(seed)
+  const r1 = await svc.run({ action: 'set_draft_status', id: 'd_ready', status: 'ready' })
+  assert.ok(!r1.draft.verification, '发现语境零闸（libraryView 无标记时为 null）')
+  const r2 = await svc.run({ action: 'set_draft_status', id: 'd_clean', status: 'published' })
+  assert.equal(r2.draft.verification.unverified, false, '真实引文（0 未核验）不误伤')
+  assert.doesNotMatch(r2.message, /未核验引文/)
 })

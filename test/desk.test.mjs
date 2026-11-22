@@ -638,3 +638,186 @@ test('A4/V5: 删灵感后 trace 标 deleted=true 但成果保留孤儿占位（�
   assert.equal(t.papers[0].title, '孤儿成果', '孤儿成果仍出现在 trace')
   assert.equal(s.papers[0].inspirationId, A, '原始成果的孤儿 inspirationId 保留，不级联')
 })
+
+
+// ── refactor-D / D1+D5：外部锚定 + 连续确信度（关2 C1–C5） ──────────────────
+// 全部走真实 applyOps，断言 state.inspirations 实际落盘值，零源码字符串。
+test('D1/D5: add_inspiration 落盘 origin/confidence/confidenceSource 三字段', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: {
+    text: '带锚点的灵感',
+    origin: { type: 'doi', ref: '10.1038/nature12373', verified: true },
+    confidence: 0.73,
+    confidenceSource: 'human',
+  } }])
+  const row = s.inspirations[0]
+  assert.equal(row.origin.type, 'doi')
+  assert.equal(row.origin.ref, '10.1038/nature12373')
+  assert.equal(row.confidence, 0.73)
+  assert.equal(row.confidenceSource, 'human')
+})
+
+test('D1: origin.verified 恒 false（P9 核验能力未落地，不谎称已核验）', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: {
+    text: '伪造核验', origin: { type: 'doi', ref: '10.1/x', verified: true },
+  } }])
+  assert.equal(s.inspirations[0].origin.verified, false, '传入 true 也被压回 false')
+})
+
+test('D1: origin.type 枚举外回落 rawtext + ref 经 cleanText', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: {
+    text: '非法类型', origin: { type: 'oracle', ref: '  某段原始文字  ' },
+  } }])
+  assert.equal(s.inspirations[0].origin.type, 'rawtext')
+  assert.equal(s.inspirations[0].origin.ref, '某段原始文字')
+})
+
+test('D5: confidence 连续值与 null 语义，且与 status 解耦', () => {
+  const s = emptyState()
+  // 不传 confidence → null（未测量）
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '未测量' } }])
+  assert.equal(s.inspirations[0].confidence, null, '缺省为未测量')
+  // 0 是合法下界，不能被当成 falsy 丢弃
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '零确信', confidence: 0 } }])
+  assert.equal(s.inspirations[0].confidence, 0, '0 是合法确信度')
+  // 同为 spark 状态，两条可有不同 confidence（status 与 confidence 解耦）
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '高确信', confidence: 0.95, status: 'spark' } }])
+  assert.equal(s.inspirations[0].status, 'spark')
+  assert.equal(s.inspirations[0].confidence, 0.95)
+  assert.equal(s.inspirations[1].status, 'spark')
+  assert.equal(s.inspirations[1].confidence, 0, '同 status 不同 confidence')
+})
+
+test('D5: confidence 越界（>1/<0/非数）被拒并回落 null', () => {
+  const s = emptyState()
+  for (const bad of [1.5, -0.2, 'abc']) {
+    applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '越界' + bad, confidence: bad } }])
+  }
+  assert.equal(s.inspirations.length, 3)
+  for (const row of s.inspirations) assert.equal(row.confidence, null, '越界值不落盘，回落未测量')
+})
+
+test('D1/D5: update_inspiration 同样规范化 origin，且不改 id/createdAt', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '待更新' } }])
+  const id = s.activeInspirationId
+  const createdAt = s.inspirations[0].createdAt
+  applyOps(s, [{ op: 'update_inspiration', id, patch: {
+    origin: { type: 'url', ref: 'https://example.org/p', verified: true },
+    confidence: 0.5,
+    confidenceSource: 'measured',
+  } }])
+  const row = s.inspirations[0]
+  assert.equal(row.id, id, '主键不可改')
+  assert.equal(row.createdAt, createdAt, '创建时间不可改')
+  assert.equal(row.origin.type, 'url')
+  assert.equal(row.origin.verified, false)
+  assert.equal(row.confidence, 0.5)
+  assert.equal(row.confidenceSource, 'measured')
+})
+
+
+// ── refactor-D / D3：trace_inspiration 第六类证据段 ──────────────────────────
+test('D3: traceInspiration 输出 evidences 段，按 inspirationId 精确 filter', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '证据灵感' } }])
+  const A = s.activeInspirationId
+  s.questions = [
+    { id: 'q1', inspirationId: A, chunkId: 'p1#0', paperId: 'p1', quote: '逐字句', verified: true, at: '2026-01-01' },
+    { id: 'q2', inspirationId: 'i_other', chunkId: 'p2#0', quote: '别人的', verified: true, at: '2026-01-02' },
+  ]
+  const t = traceInspiration(s, A)
+  assert.equal(t.evidences.length, 1)
+  assert.equal(t.evidences[0].chunkId, 'p1#0')
+  assert.equal(t.evidences[0].quote, '逐字句')
+  assert.equal(t.evidences[0].verified, true)
+  assert.equal(t.total, 0, '证据不计入五类成果总数')
+})
+
+test('D3: evidences 按 at 排序且 verified 原样保留（未核验也留痕）', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '排序灵感' } }])
+  const A = s.activeInspirationId
+  s.questions = [
+    { id: 'q2', inspirationId: A, chunkId: 'c2', quote: 'q2', verified: false, at: '2026-02-01' },
+    { id: 'q1', inspirationId: A, chunkId: 'c1', quote: 'q1', verified: true, at: '2026-01-01' },
+  ]
+  const t = traceInspiration(s, A)
+  assert.equal(t.evidences[0].chunkId, 'c1')
+  assert.equal(t.evidences[1].chunkId, 'c2')
+  assert.equal(t.evidences[1].verified, false, '未核验如实留痕，不隐藏')
+})
+
+
+// ===== D4 辩护语境发布软闸（verifyCitations 固化的核验信号，软闸不硬拦） =====
+test('D4: 无未核验信号时 published 标 unverified=false，不误伤', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '干净灵感' } }])
+  applyOps(s, [{ op: 'add_draft', title: '干净稿', body: '正文' }])
+  const id = s.drafts[0].id
+  const res = applyOps(s, [{ op: 'set_draft_status', id, status: 'published' }])
+  assert.equal(res.errors.length, 0)
+  assert.equal(s.drafts[0].status, 'published')
+  assert.equal(s.drafts[0].verification.unverified, false)
+  assert.equal(s.drafts[0].verification.count, 0)
+})
+
+test('D4: published 读 reviews.unverifiedCount + questions 未核验信号写 metadata，仍允许发布（不硬拦）', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '含伪造引文灵感' } }])
+  const A = s.activeInspirationId
+  applyOps(s, [{ op: 'add_draft', title: '带伪造引文稿', body: '正文' }])
+  applyOps(s, [{ op: 'add_review', topic: '综述', sections: [{ key: 's1', label: '方法', text: '一段正文' }], stats: { unverifiedCount: 2 } }])
+  s.questions = [
+    { id: 'q1', inspirationId: A, chunkId: 'c1', quote: '伪造', verified: false, at: '2026-01-01' },
+    { id: 'q2', inspirationId: A, chunkId: 'c2', quote: '真实', verified: true, at: '2026-01-02' },
+  ]
+  const id = s.drafts[0].id
+  const res = applyOps(s, [{ op: 'set_draft_status', id, status: 'published' }])
+  assert.equal(res.errors.length, 0)
+  assert.equal(s.drafts[0].status, 'published', '软闸不硬拦：status 真实变为 published')
+  assert.equal(s.drafts[0].verification.unverified, true)
+  assert.equal(s.drafts[0].verification.count, 3, '2 条 review 未核验 + 1 条 question 未核验')
+  assert.ok(String(s.drafts[0].verification.at))
+  const receipt = res.receipts[0].text
+  assert.match(receipt, /未核验引文/, 'receipt 显著标记')
+  assert.match(receipt, /3 条/, 'receipt 报出条数')
+})
+
+test('D4: 发现语境（非 published）不加闸，无 verification 字段', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '发现灵感' } }])
+  applyOps(s, [{ op: 'add_draft', title: '初稿', body: '正文' }])
+  applyOps(s, [{ op: 'add_review', topic: '综述', sections: [{ key: 's1', label: '方法', text: '一段正文' }], stats: { unverifiedCount: 5 } }])
+  const id = s.drafts[0].id
+  applyOps(s, [{ op: 'set_draft_status', id, status: 'ready' }])
+  assert.equal(s.drafts[0].status, 'ready')
+  assert.equal(s.drafts[0].verification, undefined, '发现语境零闸')
+})
+
+test('D4: 从 published 退回非发布态清除 verification 标记', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '退回灵感' } }])
+  applyOps(s, [{ op: 'add_draft', title: '退回稿', body: '正文' }])
+  applyOps(s, [{ op: 'add_review', topic: '综述', sections: [{ key: 's1', label: '方法', text: '一段正文' }], stats: { unverifiedCount: 1 } }])
+  const id = s.drafts[0].id
+  applyOps(s, [{ op: 'set_draft_status', id, status: 'published' }])
+  assert.equal(s.drafts[0].verification.unverified, true)
+  applyOps(s, [{ op: 'set_draft_status', id, status: 'draft' }])
+  assert.equal(s.drafts[0].verification, undefined, '退回后标记清除')
+})
+
+test('D4: verification 只认同 inspirationId 的核验信号，不串灵感', () => {
+  const s = emptyState()
+  applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '本灵感' } }])
+  const A = s.activeInspirationId
+  applyOps(s, [{ op: 'add_draft', title: '本稿', body: '正文' }])
+  // 别的灵感的 review 未核验，不应算进来
+  applyOps(s, [{ op: 'add_review', topic: '他人综述', sections: [{ key: 's1', label: '方法', text: '一段正文' }], stats: { unverifiedCount: 9 } }])
+  s.reviews[0].inspirationId = 'i_other'
+  const id = s.drafts[0].id
+  applyOps(s, [{ op: 'set_draft_status', id, status: 'published' }])
+  assert.equal(s.drafts[0].verification.count, 0, '他人未核验不串入')
+})
