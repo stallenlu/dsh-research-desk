@@ -182,3 +182,33 @@ test('A4/V6: 五格式导出元数据含 inspirationId 与灵感标题（或已�
   assert.ok(noteLines[0].includes('灵感：'), '单条 note 仍须保留灵感注记')
 })
 
+// ── D7 主体间可检验：导出复用固化核验信号，不重跑 verifyCitations ────────────
+test('D7 导出核验状态：memory 灵感标未核验 + unverifiedCount 汇总 + 引文带 paperId', () => {
+  const state = {
+    updatedAt: '2026-11-22T00:00:00.000Z',
+    inspirations: [
+      { id: 'i_m', text: '纯模型记忆的猜想', origin: { type: 'memory', ref: '', verified: false }, confidence: 0.3, confidenceSource: 'model' },
+      { id: 'i_d', text: '带 DOI 的锚定灵感', origin: { type: 'doi', ref: '10.1/abc', verified: true }, confidence: 0.8, confidenceSource: 'human' },
+    ],
+    questions: [
+      { id: 'q1', inspirationId: 'i_m', paperId: '', chunkId: '', quote: 'never', verified: false },
+      { id: 'q2', inspirationId: 'i_m', paperId: 'p1', chunkId: 'c1', quote: 'MATCH', verified: true },
+    ],
+    reviews: [{
+      id: 'r1', topic: '综述', inspirationId: 'i_m',
+      sections: [{ key: 's1', label: '方法', text: '正文', citations: [{ paperId: 'p1', chunkId: 'c1', quote: 'MATCH' }], unverified: [{ chunkId: 'c9', reason: 'not found' }] }],
+      stats: { sections: 1, citationCount: 0, unverifiedCount: 1, paperCount: 0 },
+    }],
+    papers: [{ ...PAPER, inspirationId: 'i_d' }],
+  }
+  const md = toMarkdown(state)
+  assert.ok(md.includes('## 核验状态（主体间可检验）'), '导出含核验状态区块')
+  assert.ok(md.includes('未核验引文节点合计：2'), 'unverifiedCount = reviews 1 + questions 1')
+  assert.ok(md.includes('无外部锚点或未核验灵感'), '有未锚定灵感提示')
+  assert.ok(md.includes('纯模型记忆的猜想'), 'memory 灵感被列出')
+  assert.ok(md.includes('origin.type=memory'), 'memory 灵感标注来源类型')
+  assert.ok(md.includes('→ 未核验'), 'memory 灵感标未核验')
+  assert.ok(md.includes('已核验引文：'), '综述引文披露区块存在')
+  assert.ok(md.includes('[p1]'), '已核验引文带 paperId（export.mjs:305 渲染路径）')
+  assert.ok(md.includes('c1「MATCH」'), '已核验引文带 chunkId+quote')
+})

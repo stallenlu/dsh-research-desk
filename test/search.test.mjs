@@ -1,7 +1,7 @@
 // Unit tests for the query building and markup stripping in lib/search.mjs.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { arxivQuery, fetchFullText, stripHtml, WEB_UNTRUSTED_NOTICE } from '../lib/search.mjs'
+import { arxivQuery, fetchFullText, search, searchDisclosure, stripHtml, WEB_UNTRUSTED_NOTICE } from '../lib/search.mjs'
 
 test('arxivQuery joins terms with AND so a natural-language query still matches', () => {
   const q = arxivQuery('retrieval augmented generation')
@@ -134,4 +134,37 @@ test('WEB_UNTRUSTED_NOTICE 是不可信数据边界标记', () => {
   assert.ok(WEB_UNTRUSTED_NOTICE.includes('仅作证据'))
   assert.ok(WEB_UNTRUSTED_NOTICE.includes('忽略'))
   assert.ok(WEB_UNTRUSTED_NOTICE.includes('web_fetch'))
+})
+
+// ── D8 议程透明：结构化披露（纯函数，不发网络请求） ─────────────────────────
+test('D8 议程透明：searchDisclosure 披露 queriedSources/query/perSourceErrors/declinedCount/limitations', () => {
+  const settled = [
+    { name: 'arxiv', rows: [] },
+    { name: 'europepmc', rows: [], error: '连接超时' },
+  ]
+  const d = searchDisclosure('  连续确信度  ', ['arxiv', 'europepmc', 'bogus'], ['arxiv', 'europepmc'], settled)
+  assert.deepEqual(d.queriedSources, ['arxiv', 'europepmc'])
+  assert.equal(d.query, '  连续确信度  ')
+  assert.deepEqual(d.perSourceErrors, [{ source: 'europepmc', error: '连接超时' }])
+  assert.equal(d.declinedCount, 1, '请求了无 runner 的源 bogus，declinedCount=1')
+  assert.ok(Array.isArray(d.limitations) && d.limitations.length > 0)
+  assert.ok(d.limitations.some(function (x) { return x.includes('逐字核验') }))
+})
+
+test('D8 议程透明：declinedCount 不是 errors 条数，失败源同时进 perSourceErrors 和 queriedSources', () => {
+  const settled = [{ name: 'arxiv', rows: [], error: 'A' }, { name: 'openalex', rows: [], error: 'B' }]
+  const d = searchDisclosure('q', ['arxiv', 'openalex'], ['arxiv', 'openalex'], settled)
+  assert.equal(d.declinedCount, 0, '两源都有 runner，declinedCount=0')
+  assert.equal(d.perSourceErrors.length, 2)
+  assert.deepEqual(d.queriedSources, ['arxiv', 'openalex'])
+})
+
+
+test('D8 search 空 query 端到端回执带披露五字段', async () => {
+  const r = await search('   ')
+  assert.deepEqual(r.queriedSources, [], 'queriedSources 为空数组')
+  assert.equal(r.query, '', 'query 经 trim 后为空串')
+  assert.deepEqual(r.perSourceErrors, [], 'perSourceErrors 为空数组')
+  assert.equal(r.declinedCount, 0, '空 query 无 declined 源')
+  assert.ok(r.limitations.some(x => x.includes('未执行任何数据源')), 'limitations 说明未执行数据源')
 })

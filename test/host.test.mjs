@@ -2375,3 +2375,41 @@ test('D4: 发现语境（ready）零标记；真实引文（unverifiedCount=0）
   assert.equal(r2.draft.verification.unverified, false, '真实引文（0 未核验）不误伤')
   assert.doesNotMatch(r2.message, /未核验引文/)
 })
+
+// ── D8 议程透明：host search 回执透传五字段（无网络请求路径） ────────────────
+test('D8 host search 回执透传结构化披露字段（含无 runner 源 declinedCount）', async () => {
+  const { svc } = freshService()
+  const result = await svc.run({ action: 'search', query: 'test query', sources: ['scopus'] })
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.queriedSources, [], 'scopus 无 runner，未实际查询任何源')
+  assert.equal(result.query, 'test query')
+  assert.equal(result.declinedCount, 1, '请求了无 runner 源')
+  assert.ok(Array.isArray(result.perSourceErrors))
+  assert.ok(Array.isArray(result.limitations) && result.limitations.length > 0)
+})
+
+test('D8 host search 空源分支也披露局限与 query', async () => {
+  const { svc } = freshService()
+  const result = await svc.run({ action: 'search', query: 'q', sources: [] })
+  assert.equal(result.ok, false)
+  assert.equal(result.query, 'q')
+  assert.deepEqual(result.queriedSources, [])
+  assert.equal(result.declinedCount, 0)
+  assert.ok(result.limitations.some(function (x) { return x.includes('未执行') }))
+})
+
+// ── D9 防伪客观分数：libraryView 暴露精简灵感视图供前端标主观 ─────────────────
+test('D9 libraryView.inspirations 暴露 confidence/confidenceSource/origin 精简视图', async () => {
+  const { svc, dir } = freshService()
+  const added = await svc.run({ action: 'add_inspiration', text: '主观确信度测试', confidence: 0.42, confidenceSource: 'model', origin: { type: 'memory', ref: '', verified: false } })
+  assert.equal(added.ok, true)
+  const lib = await svc.run({ action: 'library' })
+  assert.equal(lib.ok, true)
+  const insp = (lib.library.inspirations || []).find(function (x) { return x.text === '主观确信度测试' })
+  assert.ok(insp, 'libraryView 暴露灵感')
+  assert.equal(insp.confidence, 0.42)
+  assert.equal(insp.confidenceSource, 'model', '前端据此标"主观/模型自评"')
+  assert.deepEqual(insp.origin, { type: 'memory', ref: '', verified: false })
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  assert.equal(persisted.inspirations.some(function (i) { return i.text === '主观确信度测试' }), true)
+})
