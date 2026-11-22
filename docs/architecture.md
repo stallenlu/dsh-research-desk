@@ -45,7 +45,7 @@ MCP 旁路：lib/mcp.mjs  runMcpStdio() → createMcpServer() → 同一个 Stor
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
 | `lib/host.mjs` | 宿主半片：注册工具与 HTTP 前缀路由；承载全部 18 个 action 的服务函数 | `name`、`inject`、`apply`、`createService` |
-| `lib/client.js` | 侧栏面板：九个页签的免构建 React 实现，请求同源桥 | `window.__ModuleLoader__.load` 注册 |
+| `lib/client.js` | 侧栏面板：五个页签的免构建 React 实现，请求同源桥 | `window.__ModuleLoader__.load` 注册 |
 | `lib/search.mjs` | arXiv / Europe PMC / OpenAlex 三源检索、arXiv 查询构造、HTML/JATS 清洗、全文抓取 | `search`、`fetchFullText`、`SOURCES` |
 | `lib/qa.mjs` | 全文分块、BM25 检索、带引文核验的问答 | `chunkText`、`retrieve`、`ask` |
 | `lib/review.mjs` | 五个综述视角的检索与生成、逐条引文核验 | `PERSPECTIVES`、`generateReview`、`perspectiveKeys` |
