@@ -1,7 +1,8 @@
 // Unit tests for the query building and markup stripping in lib/search.mjs.
+// P9 可达性测试在文件末尾（verdictFromFetchResult / fetchOriginReachability）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { arxivQuery, fetchFullText, search, searchDisclosure, stripHtml, WEB_UNTRUSTED_NOTICE } from '../lib/search.mjs'
+import { arxivQuery, fetchFullText, fetchOriginReachability, search, searchDisclosure, stripHtml, verdictFromFetchResult, WEB_UNTRUSTED_NOTICE } from '../lib/search.mjs'
 
 test('arxivQuery joins terms with AND so a natural-language query still matches', () => {
   const q = arxivQuery('retrieval augmented generation')
@@ -167,4 +168,31 @@ test('D8 search 空 query 端到端回执带披露五字段', async () => {
   assert.deepEqual(r.perSourceErrors, [], 'perSourceErrors 为空数组')
   assert.equal(r.declinedCount, 0, '空 query 无 declined 源')
   assert.ok(r.limitations.some(x => x.includes('未执行任何数据源')), 'limitations 说明未执行数据源')
+})
+
+// ── P9 外部锚点可达性：纯函数 + 可注入 fetcher，全程离线 ─────────────────────
+test('P9 verdictFromFetchResult：可读正文判可达，壳体页/空正文判不可达', () => {
+  const good = verdictFromFetchResult({ isError: false, value: { body: { content: '<html><body><p>' + 'x'.repeat(1600) + '</p></body></html>' } } })
+  assert.equal(good.reachable, true)
+  assert.equal(good.reason, 'ok')
+  const shell = verdictFromFetchResult({ isError: false, value: '<html>please sign in to continue ' + 'y'.repeat(1600) + '</html>' })
+  assert.equal(shell.reachable, false)
+  assert.equal(shell.reason, 'shell-or-login-page')
+  const empty = verdictFromFetchResult({ isError: true, value: {} })
+  assert.equal(empty.reachable, false)
+  assert.equal(empty.reason, 'empty')
+})
+
+test('P9 fetchOriginReachability 注入 fetcher：离线可测，不碰宿主工具', async () => {
+  let called = ''
+  const reach = await fetchOriginReachability('https://doi.org/10.1/test', {
+    fetcher: async (url) => { called = url; return { isError: false, value: { body: { content: '<p>' + 'z'.repeat(1600) + '</p>' } } } },
+  })
+  assert.equal(called, 'https://doi.org/10.1/test')
+  assert.equal(reach.reachable, true)
+  const blocked = await fetchOriginReachability('https://doi.org/10.1/bad', {
+    fetcher: async () => { throw new Error('offline') },
+  })
+  assert.equal(blocked.reachable, false)
+  assert.equal(blocked.reason, 'fetch-error')
 })

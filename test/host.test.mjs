@@ -2413,3 +2413,68 @@ test('D9 libraryView.inspirations 暴露 confidence/confidenceSource/origin 精�
   const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
   assert.equal(persisted.inspirations.some(function (i) { return i.text === '主观确信度测试' }), true)
 })
+
+// ── P9 verify_origin：无 web_fetch 工具的集成测试上下文 → 天然不可达、不发真网 ──
+test('verify_origin：无 web_fetch 工具时保持未核验、不误标已核验', async () => {
+  const seed = { inspirations: [{ id: 'i_p9', text: '锚点', origin: { type: 'doi', ref: '10.1/x', verified: false }, status: 'spark', createdAt: '2026-01-01' }], activeInspirationId: 'i_p9' }
+  const { svc } = freshService(seed)
+  const r = await svc.run({ action: 'verify_origin', id: 'i_p9' })
+  assert.equal(r.ok, false)
+  assert.equal(r.verified, false)
+  assert.ok(r.message.includes('未达'))
+  const noAnchor = await svc.run({ action: 'verify_origin', id: 'i_missing' })
+  assert.equal(noAnchor.ok, false)
+})
+
+// P9 N1 封口：注入 web_fetch 工具的成功路径，直接执行 verifyOrigin 的 store.mutate + applyOps 写库分支。
+// 与无工具不可达分支互补，覆盖「可达→verified=true→state.json 落盘→library 回执带新值」全链。
+test('verify_origin：注入 web_fetch 可达 → 写 verified=true + state.json 落盘 + library 回执带新值', async () => {
+  caseIndex += 1
+  const dir = join(tempHome, 'case-' + caseIndex)
+  mkdirSync(dir, { recursive: true })
+  mkdirSync(join(dir, 'research-desk'), { recursive: true })
+  const seed = {
+    inspirations: [{ id: 'i_p9_ok', text: '锚点可达', origin: { type: 'doi', ref: '10.1/ok', verified: false }, status: 'spark', createdAt: '2026-01-01' }],
+    activeInspirationId: 'i_p9_ok',
+  }
+  writeFileSync(join(dir, 'research-desk', 'state.json'), JSON.stringify(seed, null, 2), 'utf8')
+  process.env.DSH_HOME = dir
+  const calls = []
+  // 注入 tools：web_fetch 返回 ≥1500 字可读正文（复用现有 webFetchCtx/LONG_FULLTEXT）。
+  const svc = createService(webFetchCtx({ isError: false, value: { content: LONG_FULLTEXT } }, calls))
+  const r = await svc.run({ action: 'verify_origin', id: 'i_p9_ok' })
+  assert.equal(r.ok, true, '可达→ok=true（成功写库分支已执行）')
+  assert.equal(r.verified, true, '回执 verified=true')
+  assert.equal(r.reach.reachable, true, '可达性判定为 true')
+  assert.ok(calls.length >= 1, '确实借宿主 web_fetch 抓取了一次')
+  // 服务端权威写回：磁盘 state.json 的 origin.verified=true。
+  const persisted = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  const row = persisted.inspirations.find(function (x) { return x.id === 'i_p9_ok' })
+  assert.equal(row.origin.verified, true, 'state.json 写回 verified=true')
+  // library 回执带新值（libraryView(after) 反映刚写回的状态）。
+  const libRow = (r.library.inspirations || []).find(function (x) { return x.id === 'i_p9_ok' })
+  assert.ok(libRow, 'library 回执含该灵感')
+  assert.equal(libRow.origin.verified, true, 'library 回执带新值 verified=true')
+})
+
+test('V11② 已拍板决策跨会话复用：重新读 state.json 后闸门仍识别已批准', async () => {
+  const { svc, dir } = freshService(null)
+  const c = await svc.run({ action: 'collab_create', title: '跨会话闸门', autonomy: 'L3' })
+  assert.equal(c.ok, true)
+  const cid = c.collab.id
+  const ask = await svc.run({ action: 'collab_decision_ask', collabId: cid, point: 'risk:install:test-pkg' })
+  assert.equal(ask.ok, true)
+  assert.ok(ask.decisionId)
+  const answered = await svc.run({ action: 'collab_decision_answer', collabId: cid, decisionId: ask.decisionId, by: 'human', choice: 'approve' })
+  assert.equal(answered.ok, true)
+  // 模拟新会话：不复用内存对象，直接从磁盘重新读同一 state.json
+  const reloaded = JSON.parse(readFileSync(statePath(dir), 'utf8'))
+  const col = reloaded.collaborations.find(x => x.id === cid)
+  const decided = col.decisions.find(d => d.id === ask.decisionId)
+  assert.equal(decided.pending, false)
+  assert.equal(decided.by, 'human')
+  assert.equal(decided.choice, 'approve')
+  assert.ok(decided.point.indexOf('risk:install:') === 0)
+  const gate = canProceed(col, 'install')
+  assert.equal(gate.ok, true, '跨会话重新读盘后，已批准的安装决策仍被闸门识别')
+})

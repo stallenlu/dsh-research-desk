@@ -821,3 +821,22 @@ test('D4: verification 只认同 inspirationId 的核验信号，不串灵感', 
   applyOps(s, [{ op: 'set_draft_status', id, status: 'published' }])
   assert.equal(s.drafts[0].verification.count, 0, '他人未核验不串入')
 })
+
+// ── P9 set_origin_verified：服务端权威写回，模型不可伪造 ──────────────────────
+test('P9 set_origin_verified：doi 锚点可写回 verified，memory 锚点被拒', () => {
+  const s = emptyState()
+  const res = applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '锚点灵感', origin: { type: 'doi', ref: '10.1/x', verified: true } } }])
+  assert.equal(res.errors.length, 0)
+  const row = s.inspirations[0]
+  assert.equal(row.origin.verified, false, '建灵感时 verified 恒 false（normalizeOrigin 诚实默认）')
+  const ok = applyOps(s, [{ op: 'set_origin_verified', id: row.id, verified: true }])
+  assert.equal(ok.errors.length, 0)
+  assert.equal(s.inspirations[0].origin.verified, true, '核验成功后服务端写回 true')
+  const bad = applyOps(s, [{ op: 'add_inspiration', inspiration: { text: '记忆灵感', origin: { type: 'memory', ref: '只是想法', verified: true } } }])
+  assert.equal(bad.errors.length, 0)
+  const mem = s.inspirations.find(x => x.text === '记忆灵感')
+  assert.equal(mem.origin.verified, false)
+  const denied = applyOps(s, [{ op: 'set_origin_verified', id: mem.id, verified: true }])
+  assert.equal(denied.errors.some(e => e.includes('DOI/URL')), true, 'memory 锚点拒绝核验')
+  assert.equal(mem.origin.verified, false, 'memory 永远 unverified')
+})
