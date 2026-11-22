@@ -152,3 +152,33 @@ test('export: bundle 五格式齐全且顺序稳定', () => {
   ])
 })
 
+// ── 阶段 A4：导出血缘 V6（终稿 §7.5，关2 C16） ─────────────────────────────
+test('A4/V6: 五格式导出元数据含 inspirationId 与灵感标题（或已删占位）', () => {
+  const state = {
+    inspirations: [{ id: 'i_line', text: '导出血缘灵感' }],
+    papers: [{ ...PAPER, inspirationId: 'i_line' }],
+    updatedAt: '2026-11-22',
+  }
+  const files = exportBundle(state, ['md', 'bib', 'json', 'typst', 'latex'])
+  const by = Object.fromEntries(files.map(f => [f.format, f.content]))
+  for (const fmt of ['md', 'bib', 'json', 'typst', 'latex']) {
+    // BibTeX/Typst/LaTeX 会把下划线转义成 \\_，属格式规范，信息未丢失。
+    const normalized = by[fmt].replace(/\\_/g, '_')
+    assert.ok(normalized.includes('i_line'), fmt + ' 应含 inspirationId')
+    assert.ok(by[fmt].includes('导出血缘灵感'), fmt + ' 应含灵感标题')
+  }
+  // 已删灵感：成果仍带 inspirationId，标题位置显示「灵感已删」占位。
+  const orphan = exportBundle({ papers: [{ ...PAPER, inspirationId: 'i_gone' }] }, ['md'])[0].content
+  assert.ok(orphan.includes('i_gone'))
+  assert.ok(orphan.includes('灵感已删'))
+  // 关4 note1：来源与灵感合并进同一条 note，不能被后者覆盖丢失（蓝图判断4「在 note 追加」）。
+  const both = exportBundle({
+    inspirations: [{ id: 'i_line', text: '导出血缘灵感' }],
+    papers: [{ ...PAPER, source: '生态检索', inspirationId: 'i_line' }],
+  }, ['bib'])[0].content
+  const noteLines = both.split('\n').filter(l => /^\s*note\s*=/.test(l))
+  assert.equal(noteLines.length, 1, '来源与灵感须合并为单条 note，不得重复字段')
+  assert.ok(noteLines[0].includes('来源：生态检索'), '单条 note 仍须保留来源注记')
+  assert.ok(noteLines[0].includes('灵感：'), '单条 note 仍须保留灵感注记')
+})
+

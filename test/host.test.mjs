@@ -323,6 +323,32 @@ test('A3: add_inspiration 回传 library 含 activeInspirationId', async () => {
   assert.equal(res.library.activeInspirationId, res.inspiration.id)
 })
 
+// ── 阶段 A4：trace_inspiration action 三层（终稿 V3，关2 C17） ───────────────
+test('A4/V3: trace_inspiration 经 action 三层真机分发，列五类成果', async () => {
+  const { svc } = freshService()
+  const ins = await svc.run({ action: 'add_inspiration', text: '三层血缘灵感' })
+  assert.equal(ins.ok, true)
+  const id = ins.inspiration.id
+  await svc.run({ action: 'add', papers: [{ title: '三层文献' }] }) // 盖章到 id
+  const res = await svc.run({ action: 'trace_inspiration', id })
+  assert.equal(res.ok, true, '白名单放行且 switch 命中 handler')
+  assert.equal(res.action, 'trace_inspiration')
+  assert.ok(res.trace)
+  assert.equal(res.trace.inspirationId, id)
+  assert.equal(res.trace.deleted, false)
+  assert.equal(res.trace.papers.length, 1)
+  assert.ok(res.message.includes('1'))
+})
+
+test('A4/V3: trace_inspiration 不存在的 id 返回空 trace 且提示已删', async () => {
+  const { svc } = freshService()
+  const res = await svc.run({ action: 'trace_inspiration', id: 'i_notexist' })
+  assert.equal(res.ok, true)
+  assert.equal(res.trace.total, 0)
+  assert.equal(res.trace.deleted, true)
+  assert.ok(res.message.includes('已删除'))
+})
+
 // ── 设置 ─────────────────────────────────────────────────────────────────────
 
 test('settings 描述覆盖全部声明的设置项，补丁能落盘，reset 恢复默认', async () => {

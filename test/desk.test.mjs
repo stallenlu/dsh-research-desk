@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { cleanText, parseJsonLoose, isHttpUrl, toNumber } from '../lib/util.mjs'
-import { applyOps, cleanProfileList, diffDeclined, emptyState, filterDeclined, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD, INSPIRATION_STATUS } from '../lib/desk.mjs'
+import { applyOps, cleanProfileList, diffDeclined, emptyState, filterDeclined, migrateState, paperKey, enrichChat, buildChatHandoff, HANDOFF_CHAR_CAP, HANDOFF_MESSAGE_THRESHOLD, INSPIRATION_STATUS, traceInspiration } from '../lib/desk.mjs'
 import { Store, revertChange } from '../lib/store.mjs'
 import { chunkText, retrieve, tokenize, ask } from '../lib/qa.mjs'
 
@@ -590,4 +590,51 @@ test('A2/V5: 删灵感后派生实体保留孤儿 inspirationId，状态位清�
   assert.equal(s.inspirations.length, 0)
   assert.equal(s.activeInspirationId, '', '删活跃灵感清状态位')
   assert.equal(s.papers[0].inspirationId, A, '孤儿标记保留，不级联篡改历史成果')
+})
+
+// ── 阶段 A4：血缘追溯 traceInspiration 纯函数（终稿 §7.4，关2 C15） ─────────
+// 五类按 inspirationId 精确 filter、按 at 排序；孤儿 deleted=true 仍列成果；不存在 ID 返回空。
+test('A4/V3: traceInspiration 列五类成果、精确 filter、按 at 排序', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '血缘灵感')
+  applyOps(s, [
+    { op: 'add_paper', paper: { title: '文献乙', at: '2026-02-01' } },
+    { op: 'add_paper', paper: { title: '文献甲', at: '2026-01-01' } },
+    { op: 'add_hypothesis', title: '选题一' },
+    { op: 'add_draft', title: '成稿一', body: '正文' },
+    { op: 'add_review', topic: '综述一', sections: [{ key: 's1', label: '方法', text: '一段正文' }], stats: {} },
+    { op: 'add_experiment', title: '实验一' },
+  ])
+  const t = traceInspiration(s, A)
+  assert.equal(t.deleted, false)
+  assert.equal(t.inspiration.text, '血缘灵感')
+  assert.equal(t.total, 6)
+  assert.equal(t.papers.length, 2)
+  assert.deepEqual(t.papers.map(x => x.title), ['文献甲', '文献乙'], '按 at 升序')
+  assert.equal(t.hypotheses.length, 1)
+  assert.equal(t.drafts.length, 1)
+  assert.equal(t.reviews.length, 1)
+  assert.equal(t.experiments.length, 1)
+})
+
+test('A4/V3: traceInspiration 对别的灵感 ID 不误列（精确匹配）', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '灵感A')
+  applyOps(s, [{ op: 'add_paper', paper: { title: '只属A' } }])
+  const other = traceInspiration(s, 'i_other')
+  assert.equal(other.total, 0)
+  assert.equal(other.deleted, true, '不存在的灵感 ID 标 deleted')
+})
+
+test('A4/V5: 删灵感后 trace 标 deleted=true 但成果保留孤儿占位（不级联）', () => {
+  const s = emptyState()
+  const A = seedInspiration(s, '将被删的灵感')
+  applyOps(s, [{ op: 'add_paper', paper: { title: '孤儿成果' } }])
+  applyOps(s, [{ op: 'remove_inspiration', id: A }])
+  const t = traceInspiration(s, A)
+  assert.equal(t.deleted, true)
+  assert.equal(t.inspiration, null)
+  assert.equal(t.papers.length, 1, '成果保留，血缘仅为历史记录')
+  assert.equal(t.papers[0].title, '孤儿成果', '孤儿成果仍出现在 trace')
+  assert.equal(s.papers[0].inspirationId, A, '原始成果的孤儿 inspirationId 保留，不级联')
 })
