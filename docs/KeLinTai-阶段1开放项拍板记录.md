@@ -112,3 +112,16 @@
 测试 Bot 在其受限沙箱（workspace-write）下报全量 `node --test` 因子进程 `spawn EPERM` 跑不全（`--experimental-test-isolation=none` 得 442/457、15 项皆 spawn EPERM 非功能失败），并在 `docs/真机验收-37项状态台账.md` 如实标注、只报实跑子集——此诚实处理予以认可。
 
 **KeLinTai 主会话（danger-full-access 策略）以默认隔离模式实跑坐实全量**：`node --test test/*.test.mjs` → `tests 457 / pass 457 / fail 0 / cancelled 0 / skipped 0 / duration_ms 2982.6`。结论：EPERM 是测试 Bot 沙箱权限收紧的环境现象，非项目缺陷；**全量 457/457 全绿口径在负责人取证环境成立**，与三组独立复核一致。台账中「当前沙箱坐实不了」对其自身环境为真，不改写其诚实记录；此处补负责人环境佐证。
+
+---
+
+## 阶段 4 收口裁定（2026-11-23，KeLinTai）
+
+四人只读复核（前端/后端/测试/验收）一致确认无真缺失、不需施工；Chief 亲验争议锚点后定调。措辞级差异留痕如下，不推翻 done-when、不改业务代码：
+
+- **D-4.1 五宫格/五栏目口径**：五宫格真实存在——hero 跨整行 `lib/client.js:2347-2355` + trend/platforms/top/advice 四 tile `lib/client.js:2356`，合计 5 格，与注释 `lib/client.js:96` 一致。下半区「研究过程分析」`lib/client.js:2359` 实挂 4 tile（funnel/growth/pace/util），第 5 项「研究建议」按 `lib/client.js:2340` 主动上移五宫格、避免同内容出现两次——属设计意图已达成、非漏做；「五栏目」为派工口头概括、docs grep=0 非文档术语。**裁定：按现状收口，口径统一表述为「五宫格 + 研究过程分析四专区」，不认定"未恢复完"，不改代码。**
+- **D-4.2 检索持久化"回验"措辞**：源码真行为落地——query `lib/client.js:703` 读 / `:1148` 写，searchResults `:747` 读（`Array.isArray` 校验）/ `:1149` 写；服务端 chat_search `lib/host.mjs:2038-2065` 有真行为断言 `test/host.test.mjs:1969/:1986/:2122`。但资料页 localStorage 跨刷新仅静态护栏 `test/client-ui.test.mjs:1662-1668`、无真机行为测试。**裁定：记「源码层真行为落地、静态护栏通过、真机待用户签」，不写"回验通过"；与全局纪律一致。**
+- **P1-3 归属口径**：阶段 2 已按冻结裁决①（不接 Mnemon）收口，阶段 4 `:107`「并入真机验收」为表述复用、不改实质（两处均指本轮不施工、真机侧无可点控件）。**裁定：统一表述为「按冻结裁决①不接 Mnemon 收口、真机侧无可点控件、无须单独点签」，两处留痕并存、不改裁定。**
+
+- **457 基线**：`git diff 63e5230..HEAD -- lib/ test/` 为空（lib/test 零改动），HEAD=6bc4f21 工作树干净、`git diff --check` 干净；457/457 fail0 沿用负责人 danger-full-access 实跑（:114）。测试 Bot 沙箱 442/15fail 为环境现象、已如实留痕、不改写。
+- **结论**：阶段 4 挂账项（P0-1/P1-1/P1-2/P1-3/P2-1/P2-2/P2-3）全部有 file:line 落盘、无 FAIL，经验收非施工方关 4 独立复核通过；29 项真机待签仍留用户在真实 DSH 客户端本人点签，团队不代签。
