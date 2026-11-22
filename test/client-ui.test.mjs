@@ -1641,3 +1641,18 @@ test('图片上限可设置：settings 定义、pickImages 动态读取、科灵
   assert.ok(readme.includes('默认单次最多 8 张图片'), 'README 默认值 8 张缺失')
   assert.ok(readme.includes('单张不超过 10MB'), 'README 默认值 10MB 缺失')
 })
+
+
+test('添加资料入口对话框标题随 doc tab 变「添加科研资料」，不再写死记灵感', () => {
+  // 标题按 ideaCapTab 条件化：doc→添加科研资料，其余→记下一个灵感
+  assert.ok(src.includes("title: ideaCapTab === 'doc' ? '添加科研资料' : '记下一个灵感'"),
+    '对话框标题须随 tab 动态：doc→添加科研资料，其余→记下一个灵感')
+  assert.ok(!src.includes("title: '记下一个灵感', onClose"),
+    '负向：不得再写死标题为记下一个灵感')
+  // 五个资料入口都先 setIdeaCapTab('doc')，故标题走 doc 分支
+  const docEntries = src.split("setIdeaCapTab('doc')").length - 1
+  assert.ok(docEntries >= 5, '资料入口须先切到 doc tab（实际 ' + docEntries + ' 处）')
+  // 灵感入口直接 setIdeaCapOpen(true)，不改 tab → 默认 note → 标题记下一个灵感
+  assert.ok(src.includes("'aria-label': '记一条灵感', title: '记一条灵感', onClick: () => setIdeaCapOpen(true)"),
+    '灵感入口不改 tab，标题保持记下一个灵感')
+})
