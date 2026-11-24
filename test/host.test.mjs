@@ -1480,7 +1480,10 @@ test('draft_image：工具不可用时诚实回落，不摆假按钮', async () 
   assert.equal(res.message, '未找到可用的订阅生图工具，这一版配图暂时做不了。')
 })
 
-test('draft_image：工具 schema 不合规视为不可用', async () => {
+test('draft_image：工具已注册但 schema 不合规 → 抛错可查（不再静默 UNAVAILABLE）', async () => {
+  // 2026-11-23 根因修复：这条造的正是"工具注册了但验真失败"场景。旧断言期望静默
+  // UNAVAILABLE，与 Chief 拍板契约「验真失败必须抛错可查、唯一合法降级=真没注册」冲突，
+  // 按新契约改为期望抛出真实原因（发现调用点在 try 外 → 冒泡到顶层兜底 :2656）。
   freshService()
   const badTools = {
     executable: () => ({ parameters: { properties: { prompt: { type: 'number' } } }, output: { schema: { properties: { paths: { type: 'array' } } } } }),
@@ -1490,7 +1493,8 @@ test('draft_image：工具 schema 不合规视为不可用', async () => {
   const svc = createService(draftImageCtx(badTools))
   const res = await svc.run(approvedArgs('c', 'd', 'x'))
   assert.equal(res.ok, false)
-  assert.equal(res.message, '未找到可用的订阅生图工具，这一版配图暂时做不了。')
+  assert.match(res.message, /验真未通过/, '注册了却验真不过必须暴露真实原因，不得降级成 UNAVAILABLE')
+  assert.ok(!res.message.includes('未找到可用的订阅生图工具'), '不能再报 UNAVAILABLE 搪塞用户')
 })
 
 // ── HTTP 直连生图回退：用户自带密钥 + OpenAI 兼容接口 ─────────────────────────
@@ -2164,6 +2168,23 @@ function scihubTools(handler) {
   return { tools, calls }
 }
 
+// LibGen 两工具 mock：def 与 dsh-scihub 的 libgen_search/libgen_download 同构
+// （lib/host.mjs:553/:592，query:string 必填、md5:string 必填）。mutateDef 供负控制造"注册但不合规"。
+function libgenTools(handler, mutateDef) {
+  const calls = []
+  const defs = {
+    libgen_search: { parameters: { properties: { query: { type: 'string' }, limit: { type: 'integer' } }, required: ['query'], additionalProperties: false } },
+    libgen_download: { parameters: { properties: { md5: { type: 'string' }, extension: { type: 'string' }, title: { type: 'string' }, author: { type: 'string' } }, required: ['md5'], additionalProperties: false } },
+  }
+  if (typeof mutateDef === 'function') mutateDef(defs)
+  const tools = {
+    executable: name => defs[name] || null,
+    selectExecutor: () => ({ describe: defsArr => ({ schemas: defsArr.map(d => ({ name: Object.keys(defs).find(n => defs[n] === d) })) }) }),
+    execute: async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: handler(c) })) } },
+  }
+  return { tools, calls }
+}
+
 test('download_paper：单篇 doi 借 scihub_pdf 下载，参数与宿主结果如实回传', async () => {
   const { tools, calls } = scihubTools(() => ({ isError: false, value: { ok: true, status: 'downloaded', doi: '10.1/x', path: '/tmp/x.pdf', bytes: 123, title: 'X' } }))
   const svc = createService(scihubCtx(tools))
@@ -2222,6 +2243,194 @@ test('download_paper：宿主工具 isError 时如实返回失败', async () => 
   assert.match(res.message, /镜像要求人机验证/)
   assert.equal(calls[0].calls[0].name, 'scihub_pdf')
   assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { url: 'https://example.org/paper' })
+})
+
+test('download_paper：原生只给 {ok,status,path,bytes} 时回执不含 undefined（等价宿主 isRemoteJsonValue 可通过）', async () => {
+  // 2026-11-23 端到端取证：原生 scihub_pdf 仅返回 {ok,status,path,bytes}。
+  // 提纯层若把 title/doi/counts/results/outDir/message 一律塞进回执，这些键的值会是
+  // undefined；宿主 isRemoteJsonValue 的 visitJsonValue 遇 undefined 直接返回 false，
+  // 工具桥据此报 "not lossless JSON"。GUI 走 HTTP sendJson(JSON.stringify) 虽会丢
+  // undefined 不受影响，但工具桥是真通道，这里按最严格口径断言递归无 undefined。
+  const lossless = v => v === undefined ? false : (v && typeof v === 'object' ? Object.keys(v).every(k => lossless(v[k])) : true)
+  const { tools } = scihubTools(() => ({ isError: false, value: { ok: true, status: 'downloaded', path: '/tmp/nature12373.pdf', bytes: 943776 } }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'download_paper', doi: '10.1038/nature12373' })
+  assert.equal(res.ok, true)
+  assert.ok(lossless(res), '回执不得含 undefined 值，否则宿主 isRemoteJsonValue 判 not lossless JSON')
+})
+
+// ── LibGen 借用（第一批生态扩展，先行断言，后端并行施工） ────────────────────
+// 契约（Chief 拍板）：走 borrowTool 正路径；注册了却验真失败/execute 报错必须抛真实
+// 原因不静默 UNAVAILABLE；提纯滤 undefined；README 合规致谢免责。
+const jsonLossless = v => v === undefined ? false : (v && typeof v === 'object' ? Object.keys(v).every(k => jsonLossless(v[k])) : true)
+
+test('libgen_search：借 libgen_search 检索，参数与宿主结果如实回执', async () => {
+  freshService()
+  const value = { ok: true, status: 'ok', query: 'Deep Learning', mirror: 'libgen.is', count: 2, results: [{ md5: 'a'.repeat(32), title: 'Deep Learning', author: 'Goodfellow' }, { md5: 'b'.repeat(32), title: 'Deep Learning: A Practitioner', author: 'Bengio' }] }
+  const { tools, calls } = libgenTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'libgen_search', query: 'Deep Learning', limit: 5 })
+  assert.equal(res.ok, true, '借到工具应成功，不得 UNAVAILABLE')
+  assert.equal(res.action, 'libgen_search')
+  assert.equal(res.status, 'ok')
+  assert.equal(res.count, 2)
+  assert.equal(res.results.length, 2)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].calls[0].name, 'libgen_search')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { query: 'Deep Learning', limit: 5 })
+})
+
+test('libgen_download：借 libgen_download 按 md5 下载，稀疏字段提纯后如实回执', async () => {
+  freshService()
+  const md5 = 'a'.repeat(32)
+  const value = { ok: true, status: 'downloaded', md5, path: '/tmp/deep-learning.pdf', bytes: 98765, extension: 'pdf' }
+  const { tools, calls } = libgenTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'libgen_download', md5 })
+  assert.equal(res.ok, true, '借到工具应成功，不得 UNAVAILABLE')
+  assert.equal(res.action, 'libgen_download')
+  assert.equal(res.status, 'downloaded')
+  assert.equal(res.path, '/tmp/deep-learning.pdf')
+  assert.equal(res.bytes, 98765)
+  assert.equal(calls[0].calls[0].name, 'libgen_download')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { md5 })
+})
+
+test('libgen：注册了但 schema 不合规 → 抛错可查，不静默 UNAVAILABLE', async () => {
+  freshService()
+  const { tools } = libgenTools(() => ({ isError: false, value: {} }), defs => { defs.libgen_search.parameters.properties.query.type = 'number' })
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'libgen_search', query: 'whatever' })
+  assert.equal(res.ok, false)
+  assert.match(res.message, /验真未通过/, '注册了却验真不过必须暴露真实原因')
+  assert.ok(!res.message.includes('暂时做不了'), '不能再报 UNAVAILABLE 搪塞用户')
+})
+
+test('libgen：execute 报错原样外抛，保留真实原因', async () => {
+  freshService()
+  const boom = new Error('libgen mirror requires captcha')
+  const { tools } = libgenTools(() => { throw boom })
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'libgen_search', query: 'x' })
+  assert.equal(res.ok, false)
+  assert.ok(res.message.includes('libgen mirror requires captcha'), 'execute 报错须原样外抛，不得吞成 UNAVAILABLE')
+  assert.ok(!res.message.includes('暂时做不了'))
+})
+
+test('libgen：原生只给稀疏字段时回执不含 undefined（等价 isRemoteJsonValue 可通过）', async () => {
+  freshService()
+  const value = { ok: true, status: 'ok', query: 'x', count: 0, results: [] }
+  const { tools } = libgenTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'libgen_search', query: 'x' })
+  assert.equal(res.ok, true)
+  assert.ok(jsonLossless(res), '回执不得含 undefined 值，否则宿主 isRemoteJsonValue 判 not lossless JSON')
+})
+
+test('libgen 合规：README 含 shadow library 致谢与版权免责文案（软断言）', t => {
+  let readme = ''
+  try { readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8') } catch {}
+  if (!/LibGen|libgen/i.test(readme)) return t.skip('README 尚未写入 LibGen 段落，后端/架构施工落地后本条转硬校验')
+  assert.match(readme, /致谢|acknowledg/i, 'LibGen 段落须致谢官方')
+  assert.match(readme, /版权|copyright|合法性|免责|jurisdiction/i, 'LibGen 段落须有版权/合法性因地区而异免责')
+})
+
+// ── Agentero 借用（第二批只读子集，先行断言，后端并行施工） ──────────────────
+// 契约（Chief 派活）：借 discover_arxiv/search_notes/read_note 三只只读工具，走 borrowTool。
+// 真名带 agentero_ 前缀（tools.js:104/:133/:176），output 稀疏 objectSchema(tools.js:12-15)。
+// vault 未配置是"可预期配置态"——execute 抛原生 'vault is not configured' 时，服务端必须
+// 转成中文人话降级提示（配置引导），既不静默 UNAVAILABLE、也不裸抛英文；其它 execute
+// 报错原样外抛保留真因（根因修复契约）。import_paper 写独立 Vault 本批不接。
+function agenteroTools(handler, mutateDef) {
+  const calls = []
+  const defs = {
+    agentero_discover_arxiv: { parameters: { properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false } },
+    agentero_search_notes: { parameters: { properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false } },
+    agentero_read_note: { parameters: { properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false } },
+  }
+  if (typeof mutateDef === 'function') mutateDef(defs)
+  const tools = {
+    executable: name => defs[name] || null,
+    selectExecutor: () => ({ describe: defsArr => ({ schemas: defsArr.map(d => ({ name: Object.keys(defs).find(n => defs[n] === d) })) }) }),
+    execute: async payload => { calls.push(payload); return { results: (payload.calls || []).map(c => ({ callId: c.id, result: handler(c) })) } },
+  }
+  return { tools, calls }
+}
+
+test('agentero_discover_arxiv：借工具检索 arXiv，参数与结果如实回执', async () => {
+  freshService()
+  const value = { ok: true, suggestions: [{ keyword: 'retrieval', reason: 'hot' }] }
+  const { tools, calls } = agenteroTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_discover_arxiv', keyword: 'retrieval' })
+  assert.equal(res.ok, true, '借到工具应成功，不得 UNAVAILABLE')
+  assert.equal(res.action, 'agentero_discover_arxiv')
+  assert.equal(calls[0].calls[0].name, 'agentero_discover_arxiv')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { keyword: 'retrieval' })
+})
+
+test('agentero_search_notes：借工具检索笔记，notes 列表如实回执', async () => {
+  freshService()
+  const value = { notes: [{ path: 'notes/x.md', title: 'X', excerpt: 'hit' }] }
+  const { tools, calls } = agenteroTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_search_notes', query: 'x' })
+  assert.equal(res.ok, true)
+  assert.equal(res.notes.length, 1)
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { query: 'x' })
+})
+
+test('agentero_read_note：借工具读取笔记，path/text 如实回执', async () => {
+  freshService()
+  const value = { path: 'notes/x.md', text: '# X\nhello', truncated: false }
+  const { tools, calls } = agenteroTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_read_note', path: 'notes/x.md' })
+  assert.equal(res.ok, true)
+  assert.equal(res.path, 'notes/x.md')
+  assert.equal(res.text, '# X\nhello')
+  assert.deepEqual(JSON.parse(calls[0].calls[0].arguments), { path: 'notes/x.md' })
+})
+
+test('agentero：注册了但 schema 不合规 → 抛错可查，不静默 UNAVAILABLE', async () => {
+  freshService()
+  const { tools } = agenteroTools(() => ({ isError: false, value: {} }), defs => { defs.agentero_discover_arxiv.parameters.properties.keyword.type = 'number' })
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_discover_arxiv', keyword: 'x' })
+  assert.equal(res.ok, false)
+  assert.match(res.message, /验真未通过/, '注册了却验真不过必须暴露真实原因')
+  assert.ok(!res.message.includes('暂时做不了'))
+})
+
+test('agentero：execute 报错原样外抛，保留真实原因', async () => {
+  freshService()
+  const { tools } = agenteroTools(() => { throw new Error('arxiv upstream timeout') })
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_discover_arxiv', keyword: 'x' })
+  assert.equal(res.ok, false)
+  assert.ok(res.message.includes('arxiv upstream timeout'), '普通 execute 报错须原样外抛保留真因')
+  assert.ok(!res.message.includes('暂时做不了'))
+})
+
+test('agentero：vault 未配置 → 独立中文人话降级，不静默不裸抛英文', async () => {
+  freshService()
+  const { tools } = agenteroTools(() => { throw new Error('vault is not configured') })
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_search_notes', query: 'x' })
+  assert.equal(res.ok, false)
+  assert.match(res.message, /还没准备好|文献笔记库的存放位置设置好/, 'vault 未配置须用架构定稿的中文人话降级')
+  assert.ok(!res.message.includes('暂时做不了'), '不能静默 UNAVAILABLE')
+  assert.ok(!res.message.includes('vault is not configured'), '不能把 raw 英文错误直接暴露给用户')
+})
+
+test('agentero：原生稀疏结果提纯后回执不含 undefined', async () => {
+  freshService()
+  const value = { notes: [{ path: 'notes/x.md', title: 'X' }] } // excerpt 缺失
+  const { tools } = agenteroTools(() => ({ isError: false, value }))
+  const svc = createService(scihubCtx(tools))
+  const res = await svc.run({ action: 'agentero_search_notes', query: 'x' })
+  assert.equal(res.ok, true)
+  assert.ok(jsonLossless(res), '回执不得含 undefined 值，否则宿主 isRemoteJsonValue 判 not lossless JSON')
 })
 
 test('归属纪律：能力清单与通用归属护栏在宿主源码在场，且不编造具体插件归属', () => {

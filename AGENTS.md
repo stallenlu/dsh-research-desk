@@ -1,0 +1,5 @@
+- 用简体中文回复用户。
+- 架构取舍以现有代码和阶段决策卡为准；不要用旧终稿覆盖或删除已落地决策。
+- 沿用服务端编排范式：客户端只渲染服务端结果，不发明客户端聚合。
+- 新增实体或字段统一走 `lib/desk.mjs` 的 `applyOps`；成果灵感归属沿用 `state.activeInspirationId` 和 `inspirations[]`。
+- DSH 能力复用统一走 `lib/toolBorrow.mjs` 的 `borrowTool`/`invokeTool`；失败原样外抛，验真策略由第一方注入。

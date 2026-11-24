@@ -1021,7 +1021,14 @@ test('image 页渲染订阅生图工具可用性小字，且提示诚实', () =>
   assert.ok(src.includes('const [imageToolAvailable, setImageToolAvailable] = useState(false)'), '状态缺失')
   assert.ok(src.includes('setImageToolAvailable(d.imageToolAvailable === true)'), '设置返回必须喂给状态')
   const host = readFileSync(new URL('../lib/host.mjs', import.meta.url), 'utf8')
-  assert.ok(host.includes('imageToolAvailable: Boolean(draftImageTool(ctx))'), 'settingsView 必须暴露探测结果')
+  // 锁语义不锁字面：字段暴露 + 值来自 draftImageTool 探测 + 抛错降级 false。
+  // 2026-11-23 settingsView 单点例外把裸 Boolean(...) 包成 IIFE try/catch，
+  // 旧断言锁死旧字面导致重构后假失败，这里改为只校验语义，避免同类重构再误报。
+  const atAvail = host.indexOf('imageToolAvailable:')
+  assert.ok(atAvail >= 0, 'settingsView 必须暴露 imageToolAvailable 字段')
+  const availSnippet = host.slice(atAvail, atAvail + 240)
+  assert.ok(availSnippet.includes('draftImageTool(ctx)'), 'imageToolAvailable 值必须来自 draftImageTool(ctx) 探测')
+  assert.match(availSnippet, /catch\s*\{\s*return false\s*\}/, '探测抛错须降级 false，不让整条 settings 查询被真故障击穿')
 })
 
 // ---- 关3：两个设置入口统一到单一面板渲染源（齿轮 → 科灵栏设置面板） ----
